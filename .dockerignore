@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.*
+docs/
+scripts/
+Makefile
+README.md
+AGENTS.md
+var/*
+!var/certificates/
+!var/certificates/edge.crt
+!var/certificates/edge.key

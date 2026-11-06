@@ -4,6 +4,9 @@
 !.env.example
 *.key
 *.pem
+*.crt
+*.csr
+*.srl
 !tests/fixtures/**/*.pem
 
 # Runtime data must never be committed

@@ -1,0 +1,86 @@
+name: proxyconsole-dev001
+
+services:
+  edge:
+    build:
+      context: ../..
+      dockerfile: deploy/nginx/edge/Dockerfile
+    ports:
+      - "${EDGE_HTTPS_PORT:-8443}:443"
+    depends_on:
+      - inspector
+    networks:
+      - edge_inspector_net
+
+  inspector:
+    image: mitmproxy/mitmproxy:latest
+    command:
+      - mitmdump
+      - --mode
+      - reverse:http://router:8080
+      - --listen-host
+      - 0.0.0.0
+      - --listen-port
+      - "8080"
+      - --set
+      - keep_host_header=true
+      - --set
+      - block_global=false
+      - --set
+      - confdir=/tmp/mitmproxy
+    expose:
+      - "8080"
+    depends_on:
+      - router
+    networks:
+      - edge_inspector_net
+      - inspector_router_net
+
+  router:
+    build:
+      context: ../..
+      dockerfile: deploy/nginx/router/Dockerfile
+    expose:
+      - "8080"
+    depends_on:
+      - echo-a
+      - echo-b
+    networks:
+      - inspector_router_net
+      - router_targets_net
+
+  echo-a:
+    build:
+      context: ../..
+      dockerfile: tests/helpers/Dockerfile
+    environment:
+      TARGET_ID: echo-a
+      LISTEN_HOST: 0.0.0.0
+      LISTEN_PORT: "8080"
+    expose:
+      - "8080"
+    networks:
+      - router_targets_net
+
+  echo-b:
+    build:
+      context: ../..
+      dockerfile: tests/helpers/Dockerfile
+    environment:
+      TARGET_ID: echo-b
+      LISTEN_HOST: 0.0.0.0
+      LISTEN_PORT: "8080"
+    expose:
+      - "8080"
+    networks:
+      - router_targets_net
+
+networks:
+  edge_inspector_net:
+    driver: bridge
+  inspector_router_net:
+    driver: bridge
+    internal: true
+  router_targets_net:
+    driver: bridge
+    internal: true
