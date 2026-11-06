@@ -8,7 +8,7 @@ Task status: In progress
 Owner: implementer
 Last verified commit: `3407437` (DEV-001 approved by review 001)
 Last substantive remote progress: `a50f2c0` (DEV-001 implementation and black-box verification)
-Dispatch baseline: pending DEV-002 assignment commit
+Task definition baseline: `d9a6e08`
 Dispatched at: 2026-11-06 23:48 JST
 Mailbox dispatch: `2` (`.agents/dispatch.json`)
 
