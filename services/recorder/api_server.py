@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local HTTP API server for capture index search, detail, import, rebuild, and retention (DEV-010 / DEV-011)."""
+"""Local HTTP API server for capture index, retention, and route management (DEV-010 / DEV-011 / DEV-020)."""
 
 from __future__ import annotations
 
@@ -14,6 +14,11 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from index_store import CaptureIndexStore
+from route_manager import (
+    DuplicateDomainError,
+    RouteNotFoundError,
+    RouteValidationError,
+)
 
 API_HOST = os.environ.get("CONTROL_API_LISTEN_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("CONTROL_API_PORT", "18480"))
@@ -103,6 +108,43 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
 
             if path == "/api/v1/retention/policy":
                 self._send_json(200, self.store.get_retention_policy())
+                return
+
+            if path == "/api/v1/routes":
+                en_str = _first_param(qs, "enabled")
+                enabled_filter = (
+                    _parse_bool(en_str) if en_str is not None else None
+                )
+                self._send_json(
+                    200,
+                    self.store.routes.list_routes(enabled=enabled_filter),
+                )
+                return
+
+            if path == "/api/v1/routes/status":
+                runs_limit_str = _first_param(qs, "runs_limit")
+                runs_limit = (
+                    int(runs_limit_str) if runs_limit_str is not None else 20
+                )
+                self._send_json(
+                    200,
+                    self.store.routes.get_routes_status(runs_limit=runs_limit),
+                )
+                return
+
+            if path.startswith("/api/v1/routes/"):
+                route_id = unquote(path[len("/api/v1/routes/") :])
+                try:
+                    self._send_json(200, self.store.routes.get_route(route_id))
+                except RouteNotFoundError as exc:
+                    self._send_json(
+                        404,
+                        {
+                            "error": "route_not_found",
+                            "route_id": route_id,
+                            "message": str(exc),
+                        },
+                    )
                 return
 
             if path == "/api/v1/captures":
@@ -221,6 +263,30 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
         _reset_periodic_timer()
         self._send_json(200, updated)
 
+    def _handle_route_update(self, route_id: str) -> None:
+        body = self._read_json_body()
+        auto_apply = (
+            _parse_bool(body["auto_apply"])
+            if "auto_apply" in body and body["auto_apply"] is not None
+            else True
+        )
+        enabled_val = (
+            _parse_bool(body["enabled"])
+            if "enabled" in body and body["enabled"] is not None
+            else None
+        )
+        res = self.store.routes.update_route(
+            route_id,
+            domain=body.get("domain"),
+            upstream_scheme=body.get("upstream_scheme"),
+            upstream_host=body.get("upstream_host"),
+            upstream_port=body.get("upstream_port"),
+            enabled=enabled_val,
+            description=body.get("description"),
+            auto_apply=auto_apply,
+        )
+        self._send_json(200, res)
+
     def do_PUT(self) -> None:
         split = urlsplit(self.path)
         path = split.path.rstrip("/") or "/"
@@ -228,11 +294,54 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
             if path == "/api/v1/retention/policy":
                 self._handle_policy_update()
                 return
+            if path.startswith("/api/v1/routes/") and path != "/api/v1/routes/status":
+                route_id = unquote(path[len("/api/v1/routes/") :])
+                self._handle_route_update(route_id)
+                return
             self._send_json(404, {"error": "not_found", "path": path})
-        except ValueError as exc:
+        except RouteNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "route_not_found", "message": str(exc)},
+            )
+        except DuplicateDomainError as exc:
+            self._send_json(
+                409,
+                {"error": "duplicate_domain", "message": str(exc)},
+            )
+        except (RouteValidationError, ValueError) as exc:
             self._send_json(
                 400,
-                {"error": "invalid_parameter", "message": str(exc)},
+                {"error": "invalid_route", "message": str(exc)},
+            )
+        except Exception as exc:
+            self._send_json(
+                500,
+                {"error": "internal_error", "message": str(exc)},
+            )
+
+    def do_PATCH(self) -> None:
+        self.do_PUT()
+
+    def do_DELETE(self) -> None:
+        split = urlsplit(self.path)
+        path = split.path.rstrip("/") or "/"
+        qs = parse_qs(split.query, keep_blank_values=False)
+        try:
+            if path.startswith("/api/v1/routes/") and path != "/api/v1/routes/status":
+                route_id = unquote(path[len("/api/v1/routes/") :])
+                auto_q = _first_param(qs, "auto_apply")
+                auto_apply = _parse_bool(auto_q) if auto_q is not None else True
+                res = self.store.routes.delete_route(
+                    route_id, auto_apply=auto_apply
+                )
+                self._send_json(200, res)
+                return
+            self._send_json(404, {"error": "not_found", "path": path})
+        except RouteNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "route_not_found", "message": str(exc)},
             )
         except Exception as exc:
             self._send_json(
@@ -251,6 +360,105 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 return
 
             body = self._read_json_body()
+
+            if path == "/api/v1/routes":
+                auto_apply = (
+                    _parse_bool(body["auto_apply"])
+                    if "auto_apply" in body and body["auto_apply"] is not None
+                    else True
+                )
+                enabled = (
+                    _parse_bool(body["enabled"])
+                    if "enabled" in body and body["enabled"] is not None
+                    else True
+                )
+                res = self.store.routes.create_route(
+                    domain=body.get("domain", ""),
+                    upstream_scheme=body.get("upstream_scheme", "http"),
+                    upstream_host=body.get("upstream_host", ""),
+                    upstream_port=body.get("upstream_port"),
+                    route_id=body.get("route_id"),
+                    enabled=enabled,
+                    description=body.get("description", ""),
+                    auto_apply=auto_apply,
+                )
+                self._send_json(201, res)
+                return
+
+            if path == "/api/v1/routes/apply":
+                sim_reload = (
+                    _parse_bool(body["simulate_reload_failure"])
+                    if "simulate_reload_failure" in body
+                    and body["simulate_reload_failure"] is not None
+                    else False
+                )
+                res = self.store.routes.apply_routes(
+                    trigger_action=str(body.get("trigger_action") or "manual_apply"),
+                    raw_candidate_config=body.get("raw_candidate_config"),
+                    inject_invalid_directive=body.get("inject_invalid_directive"),
+                    simulate_reload_failure=sim_reload,
+                )
+                http_code = 200 if res["applied"] else 422
+                self._send_json(http_code, res)
+                return
+
+            if path.startswith("/api/v1/routes/") and path.endswith("/copy"):
+                source_id = unquote(
+                    path[len("/api/v1/routes/") : -len("/copy")]
+                )
+                auto_apply = (
+                    _parse_bool(body["auto_apply"])
+                    if "auto_apply" in body and body["auto_apply"] is not None
+                    else True
+                )
+                enabled = (
+                    _parse_bool(body["enabled"])
+                    if "enabled" in body and body["enabled"] is not None
+                    else None
+                )
+                res = self.store.routes.copy_route(
+                    source_id,
+                    domain=body.get("domain"),
+                    route_id=body.get("route_id"),
+                    enabled=enabled,
+                    description=body.get("description"),
+                    upstream_scheme=body.get("upstream_scheme"),
+                    upstream_host=body.get("upstream_host"),
+                    upstream_port=body.get("upstream_port"),
+                    auto_apply=auto_apply,
+                )
+                self._send_json(201, res)
+                return
+
+            if path.startswith("/api/v1/routes/") and path.endswith("/enable"):
+                route_id = unquote(
+                    path[len("/api/v1/routes/") : -len("/enable")]
+                )
+                auto_apply = (
+                    _parse_bool(body["auto_apply"])
+                    if "auto_apply" in body and body["auto_apply"] is not None
+                    else True
+                )
+                res = self.store.routes.set_route_enabled(
+                    route_id, True, auto_apply=auto_apply
+                )
+                self._send_json(200, res)
+                return
+
+            if path.startswith("/api/v1/routes/") and path.endswith("/disable"):
+                route_id = unquote(
+                    path[len("/api/v1/routes/") : -len("/disable")]
+                )
+                auto_apply = (
+                    _parse_bool(body["auto_apply"])
+                    if "auto_apply" in body and body["auto_apply"] is not None
+                    else True
+                )
+                res = self.store.routes.set_route_enabled(
+                    route_id, False, auto_apply=auto_apply
+                )
+                self._send_json(200, res)
+                return
 
             if path == "/api/v1/retention/run":
                 dry_run_q = _first_param(qs, "dry_run")
@@ -286,10 +494,20 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 return
 
             self._send_json(404, {"error": "not_found", "path": path})
-        except ValueError as exc:
+        except RouteNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "route_not_found", "message": str(exc)},
+            )
+        except DuplicateDomainError as exc:
+            self._send_json(
+                409,
+                {"error": "duplicate_domain", "message": str(exc)},
+            )
+        except (RouteValidationError, ValueError) as exc:
             self._send_json(
                 400,
-                {"error": "invalid_parameter", "message": str(exc)},
+                {"error": "invalid_route", "message": str(exc)},
             )
         except Exception as exc:
             self._send_json(

@@ -76,11 +76,14 @@ class CaptureRecorderAddon:
 
     def _resolve_route_id(self, authority: str) -> str:
         host_only = authority.split(":", 1)[0].strip().lower()
-        if host_only == "app-a.local.test":
-            return "route:app-a"
-        if host_only == "app-b.local.test":
-            return "route:app-b"
-        return f"route:unmatched:{host_only or 'empty'}"
+        try:
+            return self.index_store.routes.resolve_route_id_for_host(host_only)
+        except Exception:
+            if host_only == "app-a.local.test":
+                return "route:app-a"
+            if host_only == "app-b.local.test":
+                return "route:app-b"
+            return f"route:unmatched:{host_only or 'empty'}"
 
     def requestheaders(self, flow: http.HTTPFlow) -> None:
         try:

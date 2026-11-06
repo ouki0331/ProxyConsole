@@ -73,6 +73,8 @@ services:
       dockerfile: deploy/nginx/router/Dockerfile
     expose:
       - "8080"
+    volumes:
+      - capture_data:/var/lib/proxyconsole
     depends_on:
       - echo-a
       - echo-b

@@ -25,10 +25,64 @@ from retention import (
     DEFAULT_SOFT_LIMIT_BYTES,
     RetentionEngine,
 )
+from route_manager import RouteManager
 
-INDEX_SCHEMA_VERSION = 2
+INDEX_SCHEMA_VERSION = 3
 MIGRATION_NAME = "001_capture_index.sql"
 RETENTION_MIGRATION_NAME = "002_retention_policy.sql"
+ROUTES_MIGRATION_NAME = "003_routes.sql"
+
+DEFAULT_ROUTES_MIGRATION_SQL = """
+CREATE TABLE IF NOT EXISTS routes (
+    route_id TEXT PRIMARY KEY,
+    domain TEXT NOT NULL UNIQUE,
+    upstream_scheme TEXT NOT NULL,
+    upstream_host TEXT NOT NULL,
+    upstream_port INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    copied_from_route_id TEXT,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_routes_domain
+    ON routes (domain);
+
+CREATE INDEX IF NOT EXISTS idx_routes_enabled
+    ON routes (enabled, domain);
+
+CREATE TABLE IF NOT EXISTS route_apply_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    seeded INTEGER NOT NULL DEFAULT 0,
+    desired_generation INTEGER NOT NULL DEFAULT 1,
+    applied_generation INTEGER NOT NULL DEFAULT 1,
+    last_apply_status TEXT NOT NULL DEFAULT 'applied',
+    last_apply_at TEXT,
+    last_attempt_at TEXT,
+    last_error TEXT,
+    rolled_back INTEGER NOT NULL DEFAULT 0,
+    active_config_sha256 TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS route_apply_runs (
+    apply_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempted_at TEXT NOT NULL,
+    trigger_action TEXT NOT NULL,
+    desired_generation INTEGER NOT NULL,
+    applied_generation_after INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    rolled_back INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    candidate_sha256 TEXT NOT NULL,
+    active_config_sha256 TEXT,
+    enabled_routes_count INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_route_apply_runs_id
+    ON route_apply_runs (apply_id DESC);
+"""
 
 DEFAULT_RETENTION_MIGRATION_SQL = """
 CREATE TABLE IF NOT EXISTS retention_policy (
@@ -191,7 +245,14 @@ class CaptureIndexStore:
                 "/app/migrations/002_retention_policy.sql",
             )
         )
+        self.routes_migration_path = Path(
+            os.environ.get(
+                "ROUTES_MIGRATION_FILE",
+                "/app/migrations/003_routes.sql",
+            )
+        )
         self.retention = RetentionEngine(self)
+        self.routes = RouteManager(self)
 
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,9 +272,14 @@ class CaptureIndexStore:
         if self.retention_migration_path.is_file():
             sql_text_002 = self.retention_migration_path.read_text(encoding="utf-8")
 
+        sql_text_003 = DEFAULT_ROUTES_MIGRATION_SQL
+        if self.routes_migration_path.is_file():
+            sql_text_003 = self.routes_migration_path.read_text(encoding="utf-8")
+
         with self._connect() as conn:
             conn.executescript(sql_text_001)
             conn.executescript(sql_text_002)
+            conn.executescript(sql_text_003)
             now_iso = datetime.now(timezone.utc).isoformat()
             conn.execute(
                 """
@@ -233,6 +299,14 @@ class CaptureIndexStore:
             )
             conn.execute(
                 """
+                INSERT INTO schema_migrations (version, name, applied_at)
+                VALUES (3, ?, ?)
+                ON CONFLICT(version) DO NOTHING
+                """,
+                (ROUTES_MIGRATION_NAME, now_iso),
+            )
+            conn.execute(
+                """
                 INSERT INTO retention_policy (
                     id, min_retention_seconds, soft_limit_bytes,
                     hard_limit_bytes, periodic_interval_seconds,
@@ -249,6 +323,61 @@ class CaptureIndexStore:
                     now_iso,
                 ),
             )
+            conn.execute(
+                """
+                INSERT INTO route_apply_state (
+                    id, seeded, desired_generation, applied_generation,
+                    last_apply_status, last_apply_at, last_attempt_at,
+                    last_error, rolled_back, active_config_sha256, updated_at
+                ) VALUES (1, 0, 1, 1, 'applied', ?, ?, NULL, 0, NULL, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+                (now_iso, now_iso, now_iso),
+            )
+            st_row = conn.execute(
+                "SELECT seeded FROM route_apply_state WHERE id = 1"
+            ).fetchone()
+            if st_row is not None and int(st_row["seeded"]) == 0:
+                seed_routes = [
+                    (
+                        "route:app-a",
+                        os.environ.get("APP_A_HOST", "app-a.local.test").strip().lower(),
+                        "http",
+                        "echo-a",
+                        8080,
+                        1,
+                        None,
+                        "Seed route for echo-a (DEV-001 compatibility)",
+                        now_iso,
+                        now_iso,
+                    ),
+                    (
+                        "route:app-b",
+                        os.environ.get("APP_B_HOST", "app-b.local.test").strip().lower(),
+                        "http",
+                        "echo-b",
+                        8080,
+                        1,
+                        None,
+                        "Seed route for echo-b (DEV-001 compatibility)",
+                        now_iso,
+                        now_iso,
+                    ),
+                ]
+                conn.executemany(
+                    """
+                    INSERT INTO routes (
+                        route_id, domain, upstream_scheme, upstream_host,
+                        upstream_port, enabled, copied_from_route_id,
+                        description, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(route_id) DO NOTHING
+                    """,
+                    seed_routes,
+                )
+                conn.execute(
+                    "UPDATE route_apply_state SET seeded = 1 WHERE id = 1"
+                )
             conn.commit()
 
     def _extract_row_params(
@@ -509,6 +638,9 @@ class CaptureIndexStore:
     def rebuild_index(self) -> dict[str, Any]:
         saved_policy = None
         saved_runs: list[dict[str, Any]] = []
+        saved_routes: list[dict[str, Any]] = []
+        saved_route_state = None
+        saved_route_runs: list[dict[str, Any]] = []
         if self.db_path.is_file():
             try:
                 with self._connect() as conn:
@@ -521,6 +653,19 @@ class CaptureIndexStore:
                         "SELECT * FROM retention_runs ORDER BY run_id ASC"
                     ).fetchall()
                     saved_runs = [dict(r) for r in run_rows]
+                    route_rows = conn.execute(
+                        "SELECT * FROM routes ORDER BY route_id ASC"
+                    ).fetchall()
+                    saved_routes = [dict(r) for r in route_rows]
+                    rs_row = conn.execute(
+                        "SELECT * FROM route_apply_state WHERE id = 1"
+                    ).fetchone()
+                    if rs_row is not None:
+                        saved_route_state = dict(rs_row)
+                    rr_rows = conn.execute(
+                        "SELECT * FROM route_apply_runs ORDER BY apply_id ASC"
+                    ).fetchall()
+                    saved_route_runs = [dict(r) for r in rr_rows]
             except Exception:
                 pass
 
@@ -530,7 +675,13 @@ class CaptureIndexStore:
                 p.unlink()
         self.ensure_schema()
 
-        if saved_policy is not None or saved_runs:
+        if (
+            saved_policy is not None
+            or saved_runs
+            or saved_route_state is not None
+            or saved_routes
+            or saved_route_runs
+        ):
             with self._connect() as conn:
                 if saved_policy is not None:
                     conn.execute(
@@ -584,6 +735,82 @@ class CaptureIndexStore:
                             sr["remaining_captures_count"],
                             sr["policy_snapshot_json"],
                             sr["details_json"],
+                        ),
+                    )
+                if saved_route_state is not None:
+                    conn.execute("DELETE FROM routes")
+                    for rt in saved_routes:
+                        conn.execute(
+                            """
+                            INSERT INTO routes (
+                                route_id, domain, upstream_scheme, upstream_host,
+                                upstream_port, enabled, copied_from_route_id,
+                                description, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                rt["route_id"],
+                                rt["domain"],
+                                rt["upstream_scheme"],
+                                rt["upstream_host"],
+                                rt["upstream_port"],
+                                rt["enabled"],
+                                rt["copied_from_route_id"],
+                                rt["description"],
+                                rt["created_at"],
+                                rt["updated_at"],
+                            ),
+                        )
+                    conn.execute(
+                        """
+                        UPDATE route_apply_state
+                        SET seeded = ?,
+                            desired_generation = ?,
+                            applied_generation = ?,
+                            last_apply_status = ?,
+                            last_apply_at = ?,
+                            last_attempt_at = ?,
+                            last_error = ?,
+                            rolled_back = ?,
+                            active_config_sha256 = ?,
+                            updated_at = ?
+                        WHERE id = 1
+                        """,
+                        (
+                            saved_route_state["seeded"],
+                            saved_route_state["desired_generation"],
+                            saved_route_state["applied_generation"],
+                            saved_route_state["last_apply_status"],
+                            saved_route_state["last_apply_at"],
+                            saved_route_state["last_attempt_at"],
+                            saved_route_state["last_error"],
+                            saved_route_state["rolled_back"],
+                            saved_route_state["active_config_sha256"],
+                            saved_route_state["updated_at"],
+                        ),
+                    )
+                for rr in saved_route_runs:
+                    conn.execute(
+                        """
+                        INSERT INTO route_apply_runs (
+                            apply_id, attempted_at, trigger_action,
+                            desired_generation, applied_generation_after,
+                            status, rolled_back, error_message,
+                            candidate_sha256, active_config_sha256, enabled_routes_count
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            rr["apply_id"],
+                            rr["attempted_at"],
+                            rr["trigger_action"],
+                            rr["desired_generation"],
+                            rr["applied_generation_after"],
+                            rr["status"],
+                            rr["rolled_back"],
+                            rr["error_message"],
+                            rr["candidate_sha256"],
+                            rr["active_config_sha256"],
+                            rr["enabled_routes_count"],
                         ),
                     )
                 conn.commit()

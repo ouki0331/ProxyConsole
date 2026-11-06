@@ -16,6 +16,11 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from index_store import CaptureIndexStore
+from route_manager import (
+    DuplicateDomainError,
+    RouteNotFoundError,
+    RouteValidationError,
+)
 
 HOP_BY_HOP_AND_REBUILT_HEADERS = {
     "host",
@@ -151,6 +156,190 @@ def cmd_retention_run(args: argparse.Namespace) -> int:
     )
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
+
+
+def _parse_cli_bool(val: str | None) -> bool | None:
+    if val is None:
+        return None
+    s = str(val).strip().lower()
+    if s in ("1", "true", "yes", "on"):
+        return True
+    if s in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"Invalid boolean value: {val}")
+
+
+def cmd_route_list(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    en = _parse_cli_bool(args.enabled)
+    res = store.routes.list_routes(enabled=en)
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_route_get(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.routes.get_route(args.route_id)
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except RouteNotFoundError as exc:
+        print(
+            json.dumps({"error": "route_not_found", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_route_status(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.routes.get_routes_status(runs_limit=args.runs_limit)
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_route_create(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    en = _parse_cli_bool(args.enabled)
+    try:
+        res = store.routes.create_route(
+            domain=args.domain,
+            upstream_scheme=args.upstream_scheme,
+            upstream_host=args.upstream_host,
+            upstream_port=args.upstream_port,
+            route_id=args.route_id,
+            enabled=True if en is None else en,
+            description=args.description or "",
+            auto_apply=not args.no_apply,
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except DuplicateDomainError as exc:
+        print(
+            json.dumps({"error": "duplicate_domain", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+    except (RouteValidationError, ValueError) as exc:
+        print(
+            json.dumps({"error": "invalid_route", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_route_update(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    en = _parse_cli_bool(args.enabled)
+    try:
+        res = store.routes.update_route(
+            args.route_id,
+            domain=args.domain,
+            upstream_scheme=args.upstream_scheme,
+            upstream_host=args.upstream_host,
+            upstream_port=args.upstream_port,
+            enabled=en,
+            description=args.description,
+            auto_apply=not args.no_apply,
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except RouteNotFoundError as exc:
+        print(
+            json.dumps({"error": "route_not_found", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+    except DuplicateDomainError as exc:
+        print(
+            json.dumps({"error": "duplicate_domain", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+    except (RouteValidationError, ValueError) as exc:
+        print(
+            json.dumps({"error": "invalid_route", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_route_copy(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    en = _parse_cli_bool(args.enabled)
+    try:
+        res = store.routes.copy_route(
+            args.source_route_id,
+            domain=args.domain,
+            route_id=args.route_id,
+            enabled=en,
+            description=args.description,
+            auto_apply=not args.no_apply,
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except RouteNotFoundError as exc:
+        print(
+            json.dumps({"error": "route_not_found", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+    except DuplicateDomainError as exc:
+        print(
+            json.dumps({"error": "duplicate_domain", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+    except (RouteValidationError, ValueError) as exc:
+        print(
+            json.dumps({"error": "invalid_route", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_route_enable_disable(args: argparse.Namespace, enabled: bool) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.routes.set_route_enabled(
+            args.route_id, enabled, auto_apply=not args.no_apply
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except RouteNotFoundError as exc:
+        print(
+            json.dumps({"error": "route_not_found", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_route_delete(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.routes.delete_route(
+            args.route_id, auto_apply=not args.no_apply
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except RouteNotFoundError as exc:
+        print(
+            json.dumps({"error": "route_not_found", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_route_apply(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.routes.apply_routes(
+        trigger_action=args.trigger_action or "cli_apply",
+        raw_candidate_config=args.raw_candidate_config,
+        inject_invalid_directive=args.inject_invalid_directive,
+        simulate_reload_failure=bool(args.simulate_reload_failure),
+    )
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0 if res["applied"] else 2
 
 
 def _mutate_pairs(
@@ -402,6 +591,72 @@ def main() -> int:
         help="Optional trigger source label (manual/periodic/dry_run)",
     )
 
+    p_r_list = sub.add_parser("route-list", help="List persisted domain routes")
+    p_r_list.add_argument(
+        "--enabled",
+        default=None,
+        help="Optional filter by enabled status (true/false)",
+    )
+
+    p_r_get = sub.add_parser("route-get", help="Get a single route by ID")
+    p_r_get.add_argument("route_id", help="Route ID")
+
+    p_r_status = sub.add_parser(
+        "route-status",
+        help="Show route apply status, active Nginx config, and apply history",
+    )
+    p_r_status.add_argument("--runs-limit", type=int, default=20)
+
+    p_r_create = sub.add_parser("route-create", help="Create a new domain route")
+    p_r_create.add_argument("--domain", required=True)
+    p_r_create.add_argument("--upstream-scheme", default="http")
+    p_r_create.add_argument("--upstream-host", required=True)
+    p_r_create.add_argument("--upstream-port", type=int, required=True)
+    p_r_create.add_argument("--route-id", default=None)
+    p_r_create.add_argument("--enabled", default="true")
+    p_r_create.add_argument("--description", default="")
+    p_r_create.add_argument("--no-apply", action="store_true")
+
+    p_r_update = sub.add_parser("route-update", help="Update an existing route")
+    p_r_update.add_argument("route_id", help="Route ID")
+    p_r_update.add_argument("--domain", default=None)
+    p_r_update.add_argument("--upstream-scheme", default=None)
+    p_r_update.add_argument("--upstream-host", default=None)
+    p_r_update.add_argument("--upstream-port", type=int, default=None)
+    p_r_update.add_argument("--enabled", default=None)
+    p_r_update.add_argument("--description", default=None)
+    p_r_update.add_argument("--no-apply", action="store_true")
+
+    p_r_copy = sub.add_parser(
+        "route-copy", help="Copy an existing route to a new domain"
+    )
+    p_r_copy.add_argument("source_route_id", help="Source route ID to copy")
+    p_r_copy.add_argument("--domain", default=None)
+    p_r_copy.add_argument("--route-id", default=None)
+    p_r_copy.add_argument("--enabled", default=None)
+    p_r_copy.add_argument("--description", default=None)
+    p_r_copy.add_argument("--no-apply", action="store_true")
+
+    p_r_enable = sub.add_parser("route-enable", help="Enable a route")
+    p_r_enable.add_argument("route_id", help="Route ID")
+    p_r_enable.add_argument("--no-apply", action="store_true")
+
+    p_r_disable = sub.add_parser("route-disable", help="Disable a route")
+    p_r_disable.add_argument("route_id", help="Route ID")
+    p_r_disable.add_argument("--no-apply", action="store_true")
+
+    p_r_delete = sub.add_parser("route-delete", help="Delete a route")
+    p_r_delete.add_argument("route_id", help="Route ID")
+    p_r_delete.add_argument("--no-apply", action="store_true")
+
+    p_r_apply = sub.add_parser(
+        "route-apply", help="Generate, validate, atomically replace, and reload Nginx router config"
+    )
+    p_r_apply.add_argument("--trigger-action", default=None)
+    p_r_apply.add_argument("--raw-candidate-config", default=None)
+    p_r_apply.add_argument("--inject-invalid-directive", default=None)
+    p_r_apply.add_argument("--simulate-reload-failure", action="store_true")
+
     p_replay = sub.add_parser("replay", help="Semantically replay a complete capture record")
     p_replay.add_argument("capture_id", help="Capture ID to replay")
     p_replay.add_argument(
@@ -449,6 +704,26 @@ def main() -> int:
         return cmd_retention_policy(args)
     if args.subcommand == "retention-run":
         return cmd_retention_run(args)
+    if args.subcommand == "route-list":
+        return cmd_route_list(args)
+    if args.subcommand == "route-get":
+        return cmd_route_get(args)
+    if args.subcommand == "route-status":
+        return cmd_route_status(args)
+    if args.subcommand == "route-create":
+        return cmd_route_create(args)
+    if args.subcommand == "route-update":
+        return cmd_route_update(args)
+    if args.subcommand == "route-copy":
+        return cmd_route_copy(args)
+    if args.subcommand == "route-enable":
+        return cmd_route_enable_disable(args, True)
+    if args.subcommand == "route-disable":
+        return cmd_route_enable_disable(args, False)
+    if args.subcommand == "route-delete":
+        return cmd_route_delete(args)
+    if args.subcommand == "route-apply":
+        return cmd_route_apply(args)
     if args.subcommand == "replay":
         return cmd_replay(args)
     return 1
