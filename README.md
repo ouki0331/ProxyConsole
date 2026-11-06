@@ -25,4 +25,4 @@ ProxyConsole 是一个面向 WSL/Docker 本地环境的可观测反向代理管�
 
 ## 当前下一步
 
-`DEV-020`：实现 route 的创建、复制、修改、启停及经过校验、原子替换和回滚的 Nginx 配置反映。任务通过 Git mailbox 自动派发，不需要用户转发提示词。
+`DEV-021`：实现 Docker container/port discovery，并将发现的 target 接入 route 选择，同时保留手动 host/port。任务通过 Git mailbox 自动派发，不需要用户转发提示词。
