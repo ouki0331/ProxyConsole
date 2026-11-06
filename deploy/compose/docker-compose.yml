@@ -13,7 +13,16 @@ services:
       - edge_inspector_net
 
   inspector:
-    image: mitmproxy/mitmproxy:latest
+    build:
+      context: ../..
+      dockerfile: services/recorder/Dockerfile
+    environment:
+      CAPTURE_STORAGE_DIR: /var/lib/proxyconsole
+      CAPTURE_MAX_BODY_BYTES: "${CAPTURE_MAX_BODY_BYTES:-1048576}"
+      CAPTURE_OVERFLOW_MODE: "${CAPTURE_OVERFLOW_MODE:-truncated}"
+      UPSTREAM_TARGET: http://router:8080
+      REPLAY_EDGE_URL: https://edge:443
+      REPLAY_CACERT: /etc/proxyconsole/certs/edge.crt
     command:
       - mitmdump
       - --mode
@@ -22,6 +31,8 @@ services:
       - 0.0.0.0
       - --listen-port
       - "8080"
+      - -s
+      - /app/recorder/addon.py
       - --set
       - keep_host_header=true
       - --set
@@ -30,6 +41,8 @@ services:
       - confdir=/tmp/mitmproxy
     expose:
       - "8080"
+    volumes:
+      - capture_data:/var/lib/proxyconsole
     depends_on:
       - router
     networks:
@@ -74,6 +87,9 @@ services:
       - "8080"
     networks:
       - router_targets_net
+
+volumes:
+  capture_data:
 
 networks:
   edge_inspector_net:
