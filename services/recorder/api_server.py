@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local HTTP API server for capture index search, detail, import, and rebuild (DEV-010)."""
+"""Local HTTP API server for capture index search, detail, import, rebuild, and retention (DEV-010 / DEV-011)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ import json
 import os
 import signal
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -16,6 +18,17 @@ from index_store import CaptureIndexStore
 API_HOST = os.environ.get("CONTROL_API_LISTEN_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("CONTROL_API_PORT", "18480"))
 
+PERIODIC_WAKE_EVENT = threading.Event()
+LAST_PERIODIC_RESET_LOCK = threading.Lock()
+LAST_PERIODIC_TS = time.monotonic()
+
+
+def _reset_periodic_timer() -> None:
+    global LAST_PERIODIC_TS
+    with LAST_PERIODIC_RESET_LOCK:
+        LAST_PERIODIC_TS = time.monotonic()
+    PERIODIC_WAKE_EVENT.set()
+
 
 def _first_param(qs: dict[str, list[str]], key: str) -> str | None:
     vals = qs.get(key)
@@ -23,6 +36,19 @@ def _first_param(qs: dict[str, list[str]], key: str) -> str | None:
         return None
     val = vals[0].strip()
     return val if val != "" else None
+
+
+def _parse_bool(val: Any) -> bool:
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return bool(val)
+    s = str(val).strip().lower()
+    if s in ("1", "true", "yes", "on"):
+        return True
+    if s in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"Invalid boolean value: {val}")
 
 
 class CaptureApiHandler(BaseHTTPRequestHandler):
@@ -39,6 +65,18 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_json_body(self) -> dict[str, Any]:
+        cl = int(self.headers.get("Content-Length", "0") or "0")
+        if cl <= 0:
+            return {}
+        raw = self.rfile.read(cl).decode("utf-8").strip()
+        if not raw:
+            return {}
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError("Request JSON body must be an object")
+        return parsed
+
     def do_GET(self) -> None:
         split = urlsplit(self.path)
         path = split.path.rstrip("/") or "/"
@@ -51,6 +89,20 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
 
             if path == "/api/v1/index/status":
                 self._send_json(200, self.store.get_index_status())
+                return
+
+            if path == "/api/v1/retention/status":
+                runs_limit_str = _first_param(qs, "runs_limit")
+                runs_limit = (
+                    int(runs_limit_str) if runs_limit_str is not None else 20
+                )
+                self._send_json(
+                    200, self.store.get_retention_status(runs_limit=runs_limit)
+                )
+                return
+
+            if path == "/api/v1/retention/policy":
+                self._send_json(200, self.store.get_retention_policy())
                 return
 
             if path == "/api/v1/captures":
@@ -127,14 +179,102 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 {"error": "internal_error", "message": str(exc)},
             )
 
+    def _handle_policy_update(self) -> None:
+        body = self._read_json_body()
+        min_ret = (
+            int(body["min_retention_seconds"])
+            if "min_retention_seconds" in body
+            and body["min_retention_seconds"] is not None
+            else None
+        )
+        soft_lim = (
+            int(body["soft_limit_bytes"])
+            if "soft_limit_bytes" in body
+            and body["soft_limit_bytes"] is not None
+            else None
+        )
+        hard_lim = (
+            int(body["hard_limit_bytes"])
+            if "hard_limit_bytes" in body
+            and body["hard_limit_bytes"] is not None
+            else None
+        )
+        interval = (
+            float(body["periodic_interval_seconds"])
+            if "periodic_interval_seconds" in body
+            and body["periodic_interval_seconds"] is not None
+            else None
+        )
+        enabled = (
+            _parse_bool(body["periodic_enabled"])
+            if "periodic_enabled" in body
+            and body["periodic_enabled"] is not None
+            else None
+        )
+        updated = self.store.update_retention_policy(
+            min_retention_seconds=min_ret,
+            soft_limit_bytes=soft_lim,
+            hard_limit_bytes=hard_lim,
+            periodic_interval_seconds=interval,
+            periodic_enabled=enabled,
+        )
+        _reset_periodic_timer()
+        self._send_json(200, updated)
+
+    def do_PUT(self) -> None:
+        split = urlsplit(self.path)
+        path = split.path.rstrip("/") or "/"
+        try:
+            if path == "/api/v1/retention/policy":
+                self._handle_policy_update()
+                return
+            self._send_json(404, {"error": "not_found", "path": path})
+        except ValueError as exc:
+            self._send_json(
+                400,
+                {"error": "invalid_parameter", "message": str(exc)},
+            )
+        except Exception as exc:
+            self._send_json(
+                500,
+                {"error": "internal_error", "message": str(exc)},
+            )
+
     def do_POST(self) -> None:
         split = urlsplit(self.path)
         path = split.path.rstrip("/") or "/"
-        cl = int(self.headers.get("Content-Length", "0") or "0")
-        if cl > 0:
-            _ = self.rfile.read(cl)
+        qs = parse_qs(split.query, keep_blank_values=False)
 
         try:
+            if path == "/api/v1/retention/policy":
+                self._handle_policy_update()
+                return
+
+            body = self._read_json_body()
+
+            if path == "/api/v1/retention/run":
+                dry_run_q = _first_param(qs, "dry_run")
+                if dry_run_q is not None:
+                    dry_run = _parse_bool(dry_run_q)
+                elif "dry_run" in body and body["dry_run"] is not None:
+                    dry_run = _parse_bool(body["dry_run"])
+                else:
+                    dry_run = False
+
+                now_param = _first_param(qs, "now") or body.get("now")
+                trigger_source = (
+                    _first_param(qs, "trigger_source")
+                    or body.get("trigger_source")
+                    or ("dry_run" if dry_run else "manual")
+                )
+                res = self.store.run_retention(
+                    dry_run=dry_run,
+                    now=str(now_param) if now_param else None,
+                    trigger_source=str(trigger_source),
+                )
+                self._send_json(200, res)
+                return
+
             if path == "/api/v1/index/import":
                 res = self.store.import_all_captures()
                 self._send_json(200, res)
@@ -146,6 +286,11 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 return
 
             self._send_json(404, {"error": "not_found", "path": path})
+        except ValueError as exc:
+            self._send_json(
+                400,
+                {"error": "invalid_parameter", "message": str(exc)},
+            )
         except Exception as exc:
             self._send_json(
                 500,
@@ -154,6 +299,41 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"[control-api] {self.address_string()} - {fmt % args}", flush=True)
+
+
+def _periodic_retention_worker(store: CaptureIndexStore) -> None:
+    global LAST_PERIODIC_TS
+    while True:
+        try:
+            PERIODIC_WAKE_EVENT.clear()
+            policy = store.get_retention_policy()
+            if not policy.get("periodic_enabled", True):
+                PERIODIC_WAKE_EVENT.wait(timeout=1.0)
+                with LAST_PERIODIC_RESET_LOCK:
+                    LAST_PERIODIC_TS = time.monotonic()
+                continue
+
+            interval = max(
+                0.2, float(policy.get("periodic_interval_seconds", 60.0))
+            )
+            with LAST_PERIODIC_RESET_LOCK:
+                elapsed = time.monotonic() - LAST_PERIODIC_TS
+
+            remaining = interval - elapsed
+            if remaining > 0:
+                PERIODIC_WAKE_EVENT.wait(timeout=min(remaining, 0.5))
+                continue
+
+            with LAST_PERIODIC_RESET_LOCK:
+                LAST_PERIODIC_TS = time.monotonic()
+
+            store.run_retention(dry_run=False, trigger_source="periodic")
+        except Exception as exc:
+            print(
+                f"[control-api] periodic retention warning: {exc}",
+                flush=True,
+            )
+            time.sleep(1.0)
 
 
 def main() -> None:
@@ -165,6 +345,14 @@ def main() -> None:
         store.import_all_captures()
     except Exception as exc:
         print(f"[control-api] startup import warning: {exc}", flush=True)
+
+    worker = threading.Thread(
+        target=_periodic_retention_worker,
+        args=(store,),
+        name="periodic-retention",
+        daemon=True,
+    )
+    worker.start()
 
     server = ThreadingHTTPServer((API_HOST, API_PORT), CaptureApiHandler)
     print(f"[control-api] listening on {API_HOST}:{API_PORT}", flush=True)

@@ -17,9 +17,54 @@ import sqlite3
 from typing import Any
 
 from parser import build_derived_views
+from retention import (
+    DEFAULT_HARD_LIMIT_BYTES,
+    DEFAULT_MIN_RETENTION_SECONDS,
+    DEFAULT_PERIODIC_ENABLED,
+    DEFAULT_PERIODIC_INTERVAL_SECONDS,
+    DEFAULT_SOFT_LIMIT_BYTES,
+    RetentionEngine,
+)
 
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
 MIGRATION_NAME = "001_capture_index.sql"
+RETENTION_MIGRATION_NAME = "002_retention_policy.sql"
+
+DEFAULT_RETENTION_MIGRATION_SQL = """
+CREATE TABLE IF NOT EXISTS retention_policy (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    min_retention_seconds INTEGER NOT NULL DEFAULT 86400,
+    soft_limit_bytes INTEGER NOT NULL DEFAULT 21474836480,
+    hard_limit_bytes INTEGER NOT NULL DEFAULT 26843545600,
+    periodic_interval_seconds REAL NOT NULL DEFAULT 60.0,
+    periodic_enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS retention_runs (
+    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ran_at TEXT NOT NULL,
+    reference_now TEXT NOT NULL,
+    trigger_source TEXT NOT NULL,
+    dry_run INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    reasons_json TEXT NOT NULL,
+    deleted_captures_count INTEGER NOT NULL,
+    deleted_orphan_blobs_count INTEGER NOT NULL,
+    deleted_corrupt_captures_count INTEGER NOT NULL,
+    missing_blobs_count INTEGER NOT NULL,
+    dangling_index_removed_count INTEGER NOT NULL DEFAULT 0,
+    freed_bytes INTEGER NOT NULL,
+    bytes_before INTEGER NOT NULL,
+    bytes_after INTEGER NOT NULL,
+    remaining_captures_count INTEGER NOT NULL,
+    policy_snapshot_json TEXT NOT NULL,
+    details_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_retention_runs_ran_at
+    ON retention_runs (run_id DESC);
+"""
 
 DEFAULT_MIGRATION_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -140,6 +185,13 @@ class CaptureIndexStore:
                 )
             )
         )
+        self.retention_migration_path = Path(
+            os.environ.get(
+                "RETENTION_MIGRATION_FILE",
+                "/app/migrations/002_retention_policy.sql",
+            )
+        )
+        self.retention = RetentionEngine(self)
 
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,19 +203,51 @@ class CaptureIndexStore:
         return conn
 
     def ensure_schema(self) -> None:
-        sql_text = DEFAULT_MIGRATION_SQL
+        sql_text_001 = DEFAULT_MIGRATION_SQL
         if self.migration_path.is_file():
-            sql_text = self.migration_path.read_text(encoding="utf-8")
+            sql_text_001 = self.migration_path.read_text(encoding="utf-8")
+
+        sql_text_002 = DEFAULT_RETENTION_MIGRATION_SQL
+        if self.retention_migration_path.is_file():
+            sql_text_002 = self.retention_migration_path.read_text(encoding="utf-8")
+
         with self._connect() as conn:
-            conn.executescript(sql_text)
+            conn.executescript(sql_text_001)
+            conn.executescript(sql_text_002)
             now_iso = datetime.now(timezone.utc).isoformat()
             conn.execute(
                 """
                 INSERT INTO schema_migrations (version, name, applied_at)
-                VALUES (?, ?, ?)
+                VALUES (1, ?, ?)
                 ON CONFLICT(version) DO NOTHING
                 """,
-                (INDEX_SCHEMA_VERSION, MIGRATION_NAME, now_iso),
+                (MIGRATION_NAME, now_iso),
+            )
+            conn.execute(
+                """
+                INSERT INTO schema_migrations (version, name, applied_at)
+                VALUES (2, ?, ?)
+                ON CONFLICT(version) DO NOTHING
+                """,
+                (RETENTION_MIGRATION_NAME, now_iso),
+            )
+            conn.execute(
+                """
+                INSERT INTO retention_policy (
+                    id, min_retention_seconds, soft_limit_bytes,
+                    hard_limit_bytes, periodic_interval_seconds,
+                    periodic_enabled, updated_at
+                ) VALUES (1, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+                (
+                    DEFAULT_MIN_RETENTION_SECONDS,
+                    DEFAULT_SOFT_LIMIT_BYTES,
+                    DEFAULT_HARD_LIMIT_BYTES,
+                    DEFAULT_PERIODIC_INTERVAL_SECONDS,
+                    1 if DEFAULT_PERIODIC_ENABLED else 0,
+                    now_iso,
+                ),
             )
             conn.commit()
 
@@ -384,7 +468,7 @@ class CaptureIndexStore:
                         ),
                     )
 
-            # Prune error records for files that were removed from disk
+            # Prune error records and index rows for files that were removed from disk
             existing_err_rows = conn.execute(
                 "SELECT record_file FROM capture_import_errors"
             ).fetchall()
@@ -393,6 +477,16 @@ class CaptureIndexStore:
                     conn.execute(
                         "DELETE FROM capture_import_errors WHERE record_file = ?",
                         (r["record_file"],),
+                    )
+
+            existing_idx_rows = conn.execute(
+                "SELECT capture_id, record_file FROM captures_index"
+            ).fetchall()
+            for r in existing_idx_rows:
+                if r["record_file"] not in seen_files:
+                    conn.execute(
+                        "DELETE FROM captures_index WHERE capture_id = ?",
+                        (r["capture_id"],),
                     )
 
             total_indexed = conn.execute(
@@ -413,11 +507,87 @@ class CaptureIndexStore:
         }
 
     def rebuild_index(self) -> dict[str, Any]:
+        saved_policy = None
+        saved_runs: list[dict[str, Any]] = []
+        if self.db_path.is_file():
+            try:
+                with self._connect() as conn:
+                    pol_row = conn.execute(
+                        "SELECT * FROM retention_policy WHERE id = 1"
+                    ).fetchone()
+                    if pol_row is not None:
+                        saved_policy = dict(pol_row)
+                    run_rows = conn.execute(
+                        "SELECT * FROM retention_runs ORDER BY run_id ASC"
+                    ).fetchall()
+                    saved_runs = [dict(r) for r in run_rows]
+            except Exception:
+                pass
+
         for suffix in ("", "-wal", "-shm"):
             p = Path(str(self.db_path) + suffix)
             if p.exists():
                 p.unlink()
         self.ensure_schema()
+
+        if saved_policy is not None or saved_runs:
+            with self._connect() as conn:
+                if saved_policy is not None:
+                    conn.execute(
+                        """
+                        UPDATE retention_policy
+                        SET min_retention_seconds = ?,
+                            soft_limit_bytes = ?,
+                            hard_limit_bytes = ?,
+                            periodic_interval_seconds = ?,
+                            periodic_enabled = ?,
+                            updated_at = ?
+                        WHERE id = 1
+                        """,
+                        (
+                            saved_policy["min_retention_seconds"],
+                            saved_policy["soft_limit_bytes"],
+                            saved_policy["hard_limit_bytes"],
+                            saved_policy["periodic_interval_seconds"],
+                            saved_policy["periodic_enabled"],
+                            saved_policy["updated_at"],
+                        ),
+                    )
+                for sr in saved_runs:
+                    conn.execute(
+                        """
+                        INSERT INTO retention_runs (
+                            run_id, ran_at, reference_now, trigger_source, dry_run,
+                            status, reasons_json, deleted_captures_count,
+                            deleted_orphan_blobs_count, deleted_corrupt_captures_count,
+                            missing_blobs_count, dangling_index_removed_count,
+                            freed_bytes, bytes_before, bytes_after,
+                            remaining_captures_count, policy_snapshot_json, details_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            sr["run_id"],
+                            sr["ran_at"],
+                            sr["reference_now"],
+                            sr["trigger_source"],
+                            sr["dry_run"],
+                            sr["status"],
+                            sr["reasons_json"],
+                            sr["deleted_captures_count"],
+                            sr["deleted_orphan_blobs_count"],
+                            sr["deleted_corrupt_captures_count"],
+                            sr["missing_blobs_count"],
+                            sr["dangling_index_removed_count"],
+                            sr["freed_bytes"],
+                            sr["bytes_before"],
+                            sr["bytes_after"],
+                            sr["remaining_captures_count"],
+                            sr["policy_snapshot_json"],
+                            sr["details_json"],
+                        ),
+                    )
+                conn.commit()
+
         result = self.import_all_captures()
         result["rebuilt"] = True
         return result
@@ -665,3 +835,39 @@ class CaptureIndexStore:
             "full_body_sha256_matches": sha256_matches,
         }
         return out
+
+    def get_retention_policy(self) -> dict[str, Any]:
+        return self.retention.get_policy()
+
+    def update_retention_policy(
+        self,
+        *,
+        min_retention_seconds: int | None = None,
+        soft_limit_bytes: int | None = None,
+        hard_limit_bytes: int | None = None,
+        periodic_interval_seconds: float | None = None,
+        periodic_enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        return self.retention.update_policy(
+            min_retention_seconds=min_retention_seconds,
+            soft_limit_bytes=soft_limit_bytes,
+            hard_limit_bytes=hard_limit_bytes,
+            periodic_interval_seconds=periodic_interval_seconds,
+            periodic_enabled=periodic_enabled,
+        )
+
+    def get_retention_status(self, *, runs_limit: int = 20) -> dict[str, Any]:
+        return self.retention.get_status(runs_limit=runs_limit)
+
+    def run_retention(
+        self,
+        *,
+        dry_run: bool = False,
+        now: str | None = None,
+        trigger_source: str = "manual",
+    ) -> dict[str, Any]:
+        return self.retention.run_cleanup(
+            dry_run=dry_run,
+            now=now,
+            trigger_source=trigger_source,
+        )

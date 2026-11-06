@@ -64,3 +64,19 @@ TLS session、TCP packet、HTTP/2 frame の byte-for-byte 再現は対象外と�
 
 上限超過時は転送を中断するのではなく、capture status を `truncated` または `metadata-only` とする。完全リプレイ不可であることを UI と API で明示する。
 
+## 保持ポリシーと容量計算範囲 (DEV-011)
+
+- **容量計算範囲 (`calculation_scope`)**:
+  - `captures_bytes`: `captures/*.json` の実ファイルサイズ合計
+  - `blobs_bytes`: `blobs/*.bin` の実ファイルサイズ合計
+  - `index_db_bytes`: `database/captures.sqlite3`（および `-wal`、`-shm`）の実ファイルサイズ合計
+  - `total_bytes`: `captures_bytes + blobs_bytes + index_db_bytes`
+  - 各 record の回収可能 byte 数は `record_bytes (captures/<id>.json) + blob_bytes (blobs/<id>.bin、存在しない場合は 0)` とする。
+- **優先順位と削除順序**:
+  1. 削除順序は常に `captured_at_unix_us ASC, capture_id ASC`（最古優先・同一時刻は capture ID 昇順）で決定的に評価する。
+  2. `total_bytes > hard_limit_bytes` の場合、最短保持期間（既定24時間）に関わらず最古 record から削除し、`hard_limit_bytes` 以下へ戻す。
+  3. `soft_limit_bytes < total_bytes <= hard_limit_bytes` の場合、最短保持期間（既定24時間）を超過した record のみを最古順で削除し、`soft_limit_bytes` 以下を目指す。24時間以内の record は保持する。
+  4. `total_bytes <= soft_limit_bytes` の場合、有効な record は削除しない。
+  5. 孤立 blob（対応 capture JSON がない `blobs/*.bin`）、破損 capture JSON、欠損 blob（`blob_ref` の実体がない record）、不整合 index row は cleanup 実行時に停止せず reconciliation され、結果に明示される。
+
+

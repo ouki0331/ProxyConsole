@@ -99,6 +99,60 @@ def cmd_index_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_retention_status(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.get_retention_status(runs_limit=args.runs_limit)
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_retention_policy(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    enabled_val: bool | None = None
+    if args.periodic_enabled is not None:
+        s = str(args.periodic_enabled).strip().lower()
+        if s in ("1", "true", "yes", "on"):
+            enabled_val = True
+        elif s in ("0", "false", "no", "off"):
+            enabled_val = False
+        else:
+            raise ValueError(f"Invalid --periodic-enabled value: {args.periodic_enabled}")
+
+    if any(
+        v is not None
+        for v in (
+            args.min_retention_seconds,
+            args.soft_limit_bytes,
+            args.hard_limit_bytes,
+            args.periodic_interval_seconds,
+            enabled_val,
+        )
+    ):
+        res = store.update_retention_policy(
+            min_retention_seconds=args.min_retention_seconds,
+            soft_limit_bytes=args.soft_limit_bytes,
+            hard_limit_bytes=args.hard_limit_bytes,
+            periodic_interval_seconds=args.periodic_interval_seconds,
+            periodic_enabled=enabled_val,
+        )
+    else:
+        res = store.get_retention_policy()
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_retention_run(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    trigger = args.trigger_source or ("dry_run" if args.dry_run else "manual")
+    res = store.run_retention(
+        dry_run=bool(args.dry_run),
+        now=args.now,
+        trigger_source=trigger,
+    )
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _mutate_pairs(
     pairs: list[tuple[str, str]], updates: list[str]
 ) -> list[tuple[str, str]]:
@@ -283,6 +337,71 @@ def main() -> int:
     sub.add_parser("rebuild", help="Delete and rebuild SQLite index from captures/*.json")
     sub.add_parser("index-status", help="Show durable index status and import errors")
 
+    p_ret_status = sub.add_parser(
+        "retention-status",
+        help="Show retention policy, storage usage, and recent cleanup history",
+    )
+    p_ret_status.add_argument(
+        "--runs-limit",
+        type=int,
+        default=20,
+        help="Maximum number of recent runs to include",
+    )
+
+    p_ret_policy = sub.add_parser(
+        "retention-policy",
+        help="Get or update retention policy settings",
+    )
+    p_ret_policy.add_argument(
+        "--min-retention-seconds",
+        type=int,
+        default=None,
+        help="Minimum retention window in seconds (default 86400)",
+    )
+    p_ret_policy.add_argument(
+        "--soft-limit-bytes",
+        type=int,
+        default=None,
+        help="Soft storage target in bytes (default 20 GiB)",
+    )
+    p_ret_policy.add_argument(
+        "--hard-limit-bytes",
+        type=int,
+        default=None,
+        help="Hard storage limit in bytes (default 25 GiB)",
+    )
+    p_ret_policy.add_argument(
+        "--periodic-interval-seconds",
+        type=float,
+        default=None,
+        help="Periodic cleanup interval in seconds",
+    )
+    p_ret_policy.add_argument(
+        "--periodic-enabled",
+        default=None,
+        help="Enable or disable periodic cleanup (true/false)",
+    )
+
+    p_ret_run = sub.add_parser(
+        "retention-run",
+        help="Execute retention cleanup or preview via --dry-run",
+    )
+    p_ret_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview deletion targets and freed bytes without modifying disk or index",
+    )
+    p_ret_run.add_argument(
+        "--now",
+        default=None,
+        help="Optional ISO-8601 reference timestamp for deterministic age evaluation",
+    )
+    p_ret_run.add_argument(
+        "--trigger-source",
+        default=None,
+        help="Optional trigger source label (manual/periodic/dry_run)",
+    )
+
     p_replay = sub.add_parser("replay", help="Semantically replay a complete capture record")
     p_replay.add_argument("capture_id", help="Capture ID to replay")
     p_replay.add_argument(
@@ -324,6 +443,12 @@ def main() -> int:
         return cmd_rebuild(args)
     if args.subcommand == "index-status":
         return cmd_index_status(args)
+    if args.subcommand == "retention-status":
+        return cmd_retention_status(args)
+    if args.subcommand == "retention-policy":
+        return cmd_retention_policy(args)
+    if args.subcommand == "retention-run":
+        return cmd_retention_run(args)
     if args.subcommand == "replay":
         return cmd_replay(args)
     return 1

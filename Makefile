@@ -16,6 +16,7 @@ test:
 	./tests/integration/test_proxy_chain.sh
 	./tests/integration/test_capture_replay.sh
 	./tests/integration/test_capture_index.sh
+	./tests/integration/test_retention_cleanup.sh
 
 clean:
 	./scripts/down.sh
