@@ -15,6 +15,16 @@
 9. シークレット、証明書秘密鍵、実通信の本文、個人情報、ランタイムデータを Git に保存しない。
 10. タスク完了時は `STATUS.md` を `Ready for review` に更新する。自分で `Done` にしない。`Done` はオーケストレーターだけが設定する。
 
+## Git mailbox による自動交代
+
+人間へ prompt の転送を依頼してはならない。実装 Agent とオーケストレーターは `.agents/README.md` の protocol に従う。
+
+- 実装 Agent は `.agents/dispatch.json` の未処理 `dispatch_id` を受信する。
+- 実装 Agent は `.agents/implementer-status.json` で acknowledgement、working、ready_for_review、blocked を返す。
+- task を push した後は `scripts/poll-agent-dispatch.sh <dispatch_id>` で次の review/dispatch を待つ。
+- オーケストレーターは review 合格または修正要求を Git に commit/push し、次の dispatch を発行する。
+- 通常の交代に利用者の操作を要求しない。
+
 ## コミット規約
 
 件名は次の形式にする。

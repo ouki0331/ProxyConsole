@@ -35,6 +35,8 @@
 4. 実装 Agent に、リポジトリ URL、Task ID、読むべき文書、終了条件だけを送る。
 5. 実装 Agent は `git pull --ff-only` 後に作業する。
 
+通常運用では手動 message の代わりに `.agents/dispatch.json` を使用する。オーケストレーターは task 文書、review 結果、増加した `dispatch_id` を commit/push する。実装 Agent は mailbox polling でこれを検出する。
+
 ## 4. Git を使った递増ポーリング
 
 基準時刻は「実装 Agent へタスクを送った時刻」または「最後の実質的な進展を含む push の時刻」とする。
@@ -85,6 +87,8 @@
 5. review 文書と `STATUS.md` を commit/push する。
 6. Owner を `implementer` に戻し、実装 Agent へ Task ID と review 文書パスだけを送る。
 
+上記の「送る」は `.agents/dispatch.json` の更新と push を意味する。利用者へ転送を依頼しない。
+
 レビュー判定:
 
 - `Approved`: 全 blocking criteria を満たす。
@@ -107,6 +111,7 @@
 3. タスク文書を `Done` にする。
 4. フェーズ内の残タスクを確認する。
 5. フェーズゲートを満たした場合だけ次フェーズの最初のタスクを作成する。
+6. 次の task が ready なら、review と同じ交代処理で新しい dispatch ID を発行する。
 
 次フェーズへ進まない条件:
 

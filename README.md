@@ -21,6 +21,7 @@ ProxyConsole 是一个面向 WSL/Docker 本地环境的可观测反向代理管�
 - [仓库目录规划](docs/architecture/REPOSITORY_LAYOUT.md)
 - [请求记录契约](docs/architecture/CAPTURE_CONTRACT.md)
 - [首个执行任务](docs/tasks/DEV-001.md)
+- [Git 自动交接协议](.agents/README.md)
 
 ## 当前下一步
 
