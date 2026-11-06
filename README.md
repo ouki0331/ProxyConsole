@@ -25,4 +25,4 @@ ProxyConsole 是一个面向 WSL/Docker 本地环境的可观测反向代理管�
 
 ## 当前下一步
 
-`DEV-011`：实现24小时最短保留、soft 20 GB、可配置 hard limit、dry-run、手动与定期清理。任务通过 Git mailbox 自动派发，不需要用户转发提示词。
+`DEV-020`：实现 route 的创建、复制、修改、启停及经过校验、原子替换和回滚的 Nginx 配置反映。任务通过 Git mailbox 自动派发，不需要用户转发提示词。
