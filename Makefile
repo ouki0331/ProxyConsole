@@ -15,7 +15,8 @@ config-test:
 test:
 	./tests/integration/test_proxy_chain.sh
 	./tests/integration/test_capture_replay.sh
+	./tests/integration/test_capture_index.sh
 
 clean:
 	./scripts/down.sh
-	rm -rf var/certificates var/captures var/blobs
+	rm -rf var/certificates var/captures var/blobs var/database

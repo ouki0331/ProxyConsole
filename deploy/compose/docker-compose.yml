@@ -49,6 +49,24 @@ services:
       - edge_inspector_net
       - inspector_router_net
 
+  control-api:
+    build:
+      context: ../..
+      dockerfile: services/recorder/Dockerfile
+    environment:
+      CAPTURE_STORAGE_DIR: /var/lib/proxyconsole
+      CONTROL_API_LISTEN_HOST: 0.0.0.0
+      CONTROL_API_PORT: "18480"
+    command: ["gosu", "mitmproxy", "python3", "/app/recorder/api_server.py"]
+    ports:
+      - "127.0.0.1:${CONTROL_API_PORT:-18480}:18480"
+    volumes:
+      - capture_data:/var/lib/proxyconsole
+    depends_on:
+      - inspector
+    networks:
+      - edge_inspector_net
+
   router:
     build:
       context: ../..

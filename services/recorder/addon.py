@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mitmproxy capture addon implementing HTTP Capture Contract v0 for DEV-002."""
+"""Mitmproxy capture addon implementing HTTP Capture Contract v0 & durable index (DEV-002 / DEV-010)."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import uuid
 
 from mitmproxy import http
 
+from index_store import CaptureIndexStore
 from parser import build_derived_views
 
 SCHEMA_VERSION = "v0"
@@ -61,6 +62,12 @@ class CaptureRecorderAddon:
         self.captures_dir.mkdir(parents=True, exist_ok=True)
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
 
+        self.index_store = CaptureIndexStore(storage_dir=self.storage_dir)
+        try:
+            self.index_store.import_all_captures()
+        except Exception as exc:
+            print(f"[recorder] startup index import warning (non-fatal): {exc}", flush=True)
+
     def _next_capture_id(self) -> str:
         self._seq += 1
         now_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -80,7 +87,6 @@ class CaptureRecorderAddon:
             flow.metadata["pc_start_monotonic"] = time.monotonic()
             flow.metadata["pc_capture_id"] = self._next_capture_id()
 
-            # Check if this request is a large upload or chunked transfer that should stream
             cl_header = flow.request.headers.get("Content-Length")
             te_header = (flow.request.headers.get("Transfer-Encoding") or "").lower()
             should_stream = False
@@ -275,6 +281,17 @@ class CaptureRecorderAddon:
             }
 
             self._write_record(capture_id, record)
+
+            # Index update is fault-isolated: index failure must never block raw capture or proxy routing
+            try:
+                self.index_store.index_record_dict(
+                    record, f"captures/{capture_id}.json"
+                )
+            except Exception as idx_exc:
+                print(
+                    f"[recorder] index update warning (raw capture preserved): {idx_exc}",
+                    flush=True,
+                )
 
             if resp is not None:
                 resp.headers["X-Capture-Id"] = capture_id

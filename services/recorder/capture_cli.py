@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture reader and semantic replay CLI for HTTP Capture Contract v0."""
+"""Capture reader, durable index query, and semantic replay CLI (DEV-002 / DEV-010)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import sys
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from parser import build_derived_views
+from index_store import CaptureIndexStore
 
 HOP_BY_HOP_AND_REBUILT_HEADERS = {
     "host",
@@ -48,71 +48,54 @@ def _load_blob(storage_dir: Path, record: dict[str, Any]) -> bytes:
     return blob_path.read_bytes()
 
 
-def cmd_list(args: argparse.Namespace) -> int:
-    storage_dir = Path(args.storage_dir)
-    captures_dir = storage_dir / "captures"
-    items: list[dict[str, Any]] = []
-    if captures_dir.is_dir():
-        for path in sorted(captures_dir.glob("*.json")):
-            try:
-                rec = json.loads(path.read_text(encoding="utf-8"))
-                req = rec.get("request", {})
-                body = req.get("body", {})
-                items.append(
-                    {
-                        "capture_id": rec.get("capture_id"),
-                        "captured_at": rec.get("captured_at"),
-                        "method": req.get("method"),
-                        "authority": req.get("authority"),
-                        "raw_path": req.get("raw_path"),
-                        "raw_query": req.get("raw_query"),
-                        "body_size": body.get("size"),
-                        "body_sha256": body.get("sha256"),
-                        "capture_status": rec.get("capture_status"),
-                        "replayable": rec.get("replayable"),
-                        "is_websocket": rec.get("is_websocket"),
-                        "response_status": rec.get("forwarding", {}).get(
-                            "response_status"
-                        ),
-                    }
-                )
-            except Exception as exc:
-                items.append({"file": path.name, "error": str(exc)})
-    print(json.dumps(items, ensure_ascii=False, indent=2))
+def cmd_search(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.query_captures(
+        limit=args.limit,
+        offset=args.offset,
+        sort=args.sort,
+        from_time=args.from_time,
+        to_time=args.to_time,
+        host=args.host,
+        authority=args.authority,
+        method=args.method,
+        path=args.path,
+        path_prefix=args.path_prefix,
+        capture_status=args.capture_status,
+        response_status=args.response_status,
+    )
+    if getattr(args, "items_only", False):
+        print(json.dumps(res["items"], ensure_ascii=False, indent=2))
+    else:
+        print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_get(args: argparse.Namespace) -> int:
-    storage_dir = Path(args.storage_dir)
-    record = _load_record(storage_dir, args.capture_id)
-    req = record["request"]
-    body_meta = req["body"]
-    blob_bytes = _load_blob(storage_dir, record)
-
-    blob_sha256 = hashlib.sha256(blob_bytes).hexdigest()
-    captured_size_matches = len(blob_bytes) == body_meta.get("captured_size", 0)
-    if record.get("capture_status") == "complete":
-        sha256_matches = blob_sha256 == body_meta.get("sha256")
-    else:
-        sha256_matches = False
-
-    regenerated_views = build_derived_views(
-        raw_query=req.get("raw_query", ""),
-        headers=req.get("headers", []),
-        raw_body=blob_bytes if record.get("capture_status") == "complete" else None,
-        content_type=body_meta.get("content_type"),
-        capture_status=record.get("capture_status", "complete"),
-    )
-
-    out = dict(record)
-    out["reader_verification"] = {
-        "blob_bytes_len": len(blob_bytes),
-        "blob_sha256": blob_sha256,
-        "captured_size_matches": captured_size_matches,
-        "full_body_sha256_matches": sha256_matches,
-    }
-    out["regenerated_derived_views"] = regenerated_views
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    out = store.get_capture_detail(args.capture_id)
     print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.import_all_captures()
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_rebuild(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.rebuild_index()
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_index_status(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.get_index_status()
+    print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -250,19 +233,55 @@ def cmd_replay(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_search_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--offset", type=int, default=0)
+    p.add_argument("--sort", choices=["desc", "asc"], default="desc")
+    p.add_argument("--from-time", default=None)
+    p.add_argument("--to-time", default=None)
+    p.add_argument("--host", default=None)
+    p.add_argument("--authority", default=None)
+    p.add_argument("--method", default=None)
+    p.add_argument("--path", default=None)
+    p.add_argument("--path-prefix", default=None)
+    p.add_argument("--capture-status", default=None)
+    p.add_argument("--response-status", type=int, default=None)
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="ProxyConsole capture reader & replay CLI")
+    parser = argparse.ArgumentParser(description="ProxyConsole capture reader, index & replay CLI")
     parser.add_argument(
         "--storage-dir",
         default=os.environ.get("CAPTURE_STORAGE_DIR", "/var/lib/proxyconsole"),
-        help="Path to capture storage directory containing captures/ and blobs/",
+        help="Path to capture storage directory containing captures/, blobs/, database/",
+    )
+    parser.add_argument(
+        "--db-path",
+        default=None,
+        help="Optional override path for SQLite index file",
     )
     sub = parser.add_subparsers(dest="subcommand", required=True)
 
-    sub.add_parser("list", help="List saved capture records")
+    p_list = sub.add_parser("list", help="Query capture records from durable index")
+    _add_search_args(p_list)
+    p_list.add_argument(
+        "--items-only",
+        action="store_true",
+        help="Print only the items array",
+    )
 
-    p_get = sub.add_parser("get", help="Read and verify a single capture record")
+    p_search = sub.add_parser("search", help="Search capture records with pagination metadata")
+    _add_search_args(p_search)
+
+    p_get = sub.add_parser("get", help="Read and verify a single capture record detail")
     p_get.add_argument("capture_id", help="Capture ID to read")
+
+    p_detail = sub.add_parser("detail", help="Alias for get: read capture record detail")
+    p_detail.add_argument("capture_id", help="Capture ID to read")
+
+    sub.add_parser("import", help="Idempotently import captures/*.json into SQLite index")
+    sub.add_parser("rebuild", help="Delete and rebuild SQLite index from captures/*.json")
+    sub.add_parser("index-status", help="Show durable index status and import errors")
 
     p_replay = sub.add_parser("replay", help="Semantically replay a complete capture record")
     p_replay.add_argument("capture_id", help="Capture ID to replay")
@@ -295,10 +314,16 @@ def main() -> int:
     )
 
     args = parser.parse_args()
-    if args.subcommand == "list":
-        return cmd_list(args)
-    if args.subcommand == "get":
+    if args.subcommand in ("list", "search"):
+        return cmd_search(args)
+    if args.subcommand in ("get", "detail"):
         return cmd_get(args)
+    if args.subcommand == "import":
+        return cmd_import(args)
+    if args.subcommand == "rebuild":
+        return cmd_rebuild(args)
+    if args.subcommand == "index-status":
+        return cmd_index_status(args)
     if args.subcommand == "replay":
         return cmd_replay(args)
     return 1
