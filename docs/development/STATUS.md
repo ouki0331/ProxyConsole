@@ -6,8 +6,8 @@ Phase gate: G0 passed / G1 pending
 Active task: DEV-001  
 Task status: Planned  
 Owner: none  
-Last verified commit: none  
-Last substantive remote progress: none
+Last verified commit: `890e10f` (initial planning baseline)
+Last substantive remote progress: `890e10f` (planning documents pushed)
 
 ## Current summary
 
