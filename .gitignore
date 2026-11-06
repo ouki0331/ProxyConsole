@@ -1,0 +1,30 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+!tests/fixtures/**/*.pem
+
+# Runtime data must never be committed
+var/
+data/
+captures/
+logs/
+*.mitm
+*.flow
+*.sqlite
+*.sqlite3
+
+# Build and editor output
+dist/
+build/
+coverage/
+.cache/
+.idea/
+.vscode/
+.DS_Store
+__pycache__/
+*.pyc
+node_modules/
+
