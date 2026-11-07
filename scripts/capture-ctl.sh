@@ -16,5 +16,10 @@ if [[ "${1:-}" == "sync" ]]; then
   exit 0
 fi
 
-docker compose -f "${COMPOSE_FILE}" exec -T inspector \
+EXEC_SERVICE="inspector"
+if [[ -n "$(docker compose -f "${COMPOSE_FILE}" ps -q control-api 2>/dev/null || true)" ]]; then
+  EXEC_SERVICE="control-api"
+fi
+
+docker compose -f "${COMPOSE_FILE}" exec -T "${EXEC_SERVICE}" \
   gosu mitmproxy python3 /app/recorder/capture_cli.py "$@"

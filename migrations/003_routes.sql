@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS routes (
     upstream_port INTEGER NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     copied_from_route_id TEXT,
+    target_metadata_json TEXT,
     description TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL

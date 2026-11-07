@@ -16,6 +16,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
+from docker_discovery import DockerDiscoveryService
 from parser import build_derived_views
 from retention import (
     DEFAULT_HARD_LIMIT_BYTES,
@@ -27,10 +28,27 @@ from retention import (
 )
 from route_manager import RouteManager
 
-INDEX_SCHEMA_VERSION = 3
+INDEX_SCHEMA_VERSION = 4
 MIGRATION_NAME = "001_capture_index.sql"
 RETENTION_MIGRATION_NAME = "002_retention_policy.sql"
 ROUTES_MIGRATION_NAME = "003_routes.sql"
+DISCOVERY_MIGRATION_NAME = "004_discovery.sql"
+
+DEFAULT_DISCOVERY_MIGRATION_SQL = """
+CREATE TABLE IF NOT EXISTS discovery_status (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    available INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'uninitialized',
+    last_refresh_at TEXT,
+    last_success_at TEXT,
+    last_error TEXT,
+    containers_count INTEGER NOT NULL DEFAULT 0,
+    running_containers_count INTEGER NOT NULL DEFAULT 0,
+    targets_count INTEGER NOT NULL DEFAULT 0,
+    socket_path_override TEXT,
+    updated_at TEXT NOT NULL
+);
+"""
 
 DEFAULT_ROUTES_MIGRATION_SQL = """
 CREATE TABLE IF NOT EXISTS routes (
@@ -41,6 +59,7 @@ CREATE TABLE IF NOT EXISTS routes (
     upstream_port INTEGER NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     copied_from_route_id TEXT,
+    target_metadata_json TEXT,
     description TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -251,8 +270,15 @@ class CaptureIndexStore:
                 "/app/migrations/003_routes.sql",
             )
         )
+        self.discovery_migration_path = Path(
+            os.environ.get(
+                "DISCOVERY_MIGRATION_FILE",
+                "/app/migrations/004_discovery.sql",
+            )
+        )
         self.retention = RetentionEngine(self)
         self.routes = RouteManager(self)
+        self.discovery = DockerDiscoveryService(self)
 
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -276,10 +302,23 @@ class CaptureIndexStore:
         if self.routes_migration_path.is_file():
             sql_text_003 = self.routes_migration_path.read_text(encoding="utf-8")
 
+        sql_text_004 = DEFAULT_DISCOVERY_MIGRATION_SQL
+        if self.discovery_migration_path.is_file():
+            sql_text_004 = self.discovery_migration_path.read_text(encoding="utf-8")
+
         with self._connect() as conn:
             conn.executescript(sql_text_001)
             conn.executescript(sql_text_002)
             conn.executescript(sql_text_003)
+            conn.executescript(sql_text_004)
+            route_cols = {
+                r["name"]
+                for r in conn.execute("PRAGMA table_info(routes)").fetchall()
+            }
+            if "target_metadata_json" not in route_cols:
+                conn.execute(
+                    "ALTER TABLE routes ADD COLUMN target_metadata_json TEXT"
+                )
             now_iso = datetime.now(timezone.utc).isoformat()
             conn.execute(
                 """
@@ -304,6 +343,25 @@ class CaptureIndexStore:
                 ON CONFLICT(version) DO NOTHING
                 """,
                 (ROUTES_MIGRATION_NAME, now_iso),
+            )
+            conn.execute(
+                """
+                INSERT INTO schema_migrations (version, name, applied_at)
+                VALUES (4, ?, ?)
+                ON CONFLICT(version) DO NOTHING
+                """,
+                (DISCOVERY_MIGRATION_NAME, now_iso),
+            )
+            conn.execute(
+                """
+                INSERT INTO discovery_status (
+                    id, available, status, last_refresh_at, last_success_at,
+                    last_error, containers_count, running_containers_count,
+                    targets_count, socket_path_override, updated_at
+                ) VALUES (1, 1, 'uninitialized', NULL, NULL, NULL, 0, 0, 0, NULL, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+                (now_iso,),
             )
             conn.execute(
                 """
@@ -745,8 +803,8 @@ class CaptureIndexStore:
                             INSERT INTO routes (
                                 route_id, domain, upstream_scheme, upstream_host,
                                 upstream_port, enabled, copied_from_route_id,
-                                description, created_at, updated_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                target_metadata_json, description, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 rt["route_id"],
@@ -756,6 +814,7 @@ class CaptureIndexStore:
                                 rt["upstream_port"],
                                 rt["enabled"],
                                 rt["copied_from_route_id"],
+                                rt.get("target_metadata_json"),
                                 rt["description"],
                                 rt["created_at"],
                                 rt["updated_at"],

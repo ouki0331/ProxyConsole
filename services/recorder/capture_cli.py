@@ -15,6 +15,11 @@ import sys
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
+from docker_discovery import (
+    DiscoveryTargetNotFoundError,
+    DiscoveryTargetValidationError,
+    DiscoveryUnavailableError,
+)
 from index_store import CaptureIndexStore
 from route_manager import (
     DuplicateDomainError,
@@ -205,8 +210,12 @@ def cmd_route_create(args: argparse.Namespace) -> int:
         res = store.routes.create_route(
             domain=args.domain,
             upstream_scheme=args.upstream_scheme,
-            upstream_host=args.upstream_host,
-            upstream_port=args.upstream_port,
+            upstream_host=getattr(args, "upstream_host", None),
+            upstream_port=getattr(args, "upstream_port", None),
+            target_id=getattr(args, "target_id", None),
+            container=getattr(args, "container", None),
+            port=getattr(args, "port", None),
+            allow_self_target=bool(getattr(args, "allow_self_target", False)),
             route_id=args.route_id,
             enabled=True if en is None else en,
             description=args.description or "",
@@ -214,6 +223,31 @@ def cmd_route_create(args: argparse.Namespace) -> int:
         )
         print(json.dumps(res, ensure_ascii=False, indent=2))
         return 0
+    except DiscoveryTargetNotFoundError as exc:
+        print(
+            json.dumps({"error": "target_not_found", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+    except DiscoveryUnavailableError as exc:
+        print(
+            json.dumps(
+                {
+                    "error": "discovery_unavailable",
+                    "message": str(exc),
+                    "fallback_manual_upstream_supported": True,
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except DiscoveryTargetValidationError as exc:
+        print(
+            json.dumps({"error": "invalid_target", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
     except DuplicateDomainError as exc:
         print(
             json.dumps({"error": "duplicate_domain", "message": str(exc)}, ensure_ascii=False),
@@ -238,6 +272,10 @@ def cmd_route_update(args: argparse.Namespace) -> int:
             upstream_scheme=args.upstream_scheme,
             upstream_host=args.upstream_host,
             upstream_port=args.upstream_port,
+            target_id=getattr(args, "target_id", None),
+            container=getattr(args, "container", None),
+            port=getattr(args, "port", None),
+            allow_self_target=bool(getattr(args, "allow_self_target", False)),
             enabled=en,
             description=args.description,
             auto_apply=not args.no_apply,
@@ -247,6 +285,31 @@ def cmd_route_update(args: argparse.Namespace) -> int:
     except RouteNotFoundError as exc:
         print(
             json.dumps({"error": "route_not_found", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+    except DiscoveryTargetNotFoundError as exc:
+        print(
+            json.dumps({"error": "target_not_found", "message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
+    except DiscoveryUnavailableError as exc:
+        print(
+            json.dumps(
+                {
+                    "error": "discovery_unavailable",
+                    "message": str(exc),
+                    "fallback_manual_upstream_supported": True,
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except DiscoveryTargetValidationError as exc:
+        print(
+            json.dumps({"error": "invalid_target", "message": str(exc)}, ensure_ascii=False),
             file=sys.stderr,
         )
         return 2
@@ -340,6 +403,54 @@ def cmd_route_apply(args: argparse.Namespace) -> int:
     )
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0 if res["applied"] else 2
+
+
+def cmd_discovery_status(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.discovery.get_status(refresh=not args.no_refresh)
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_discovery_containers(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.discovery.list_containers(
+        include_self=bool(args.include_self),
+        state=args.state,
+        scope=args.scope,
+    )
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_discovery_targets(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.discovery.list_targets(
+        include_self=bool(args.include_self),
+        include_stopped=bool(args.include_stopped),
+        scope=args.scope,
+    )
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_discovery_refresh(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.discovery.refresh(
+        include_self=bool(args.include_self),
+        include_stopped=bool(args.include_stopped),
+        scope=args.scope,
+    )
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_discovery_config(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    override = None if args.reset else args.socket_path_override
+    res = store.discovery.set_socket_path_override(override)
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
 
 
 def _mutate_pairs(
@@ -610,12 +721,31 @@ def main() -> int:
     p_r_create = sub.add_parser("route-create", help="Create a new domain route")
     p_r_create.add_argument("--domain", required=True)
     p_r_create.add_argument("--upstream-scheme", default="http")
-    p_r_create.add_argument("--upstream-host", required=True)
-    p_r_create.add_argument("--upstream-port", type=int, required=True)
+    p_r_create.add_argument("--upstream-host", default=None)
+    p_r_create.add_argument("--upstream-port", type=int, default=None)
+    p_r_create.add_argument("--target-id", default=None)
+    p_r_create.add_argument("--container", default=None)
+    p_r_create.add_argument("--port", type=int, default=None)
+    p_r_create.add_argument("--allow-self-target", action="store_true")
     p_r_create.add_argument("--route-id", default=None)
     p_r_create.add_argument("--enabled", default="true")
     p_r_create.add_argument("--description", default="")
     p_r_create.add_argument("--no-apply", action="store_true")
+
+    p_r_target = sub.add_parser(
+        "route-create-from-target",
+        help="Create a new domain route from a discovered Docker container target",
+    )
+    p_r_target.add_argument("--domain", required=True)
+    p_r_target.add_argument("--target-id", default=None)
+    p_r_target.add_argument("--container", default=None)
+    p_r_target.add_argument("--port", type=int, default=None)
+    p_r_target.add_argument("--upstream-scheme", default="http")
+    p_r_target.add_argument("--allow-self-target", action="store_true")
+    p_r_target.add_argument("--route-id", default=None)
+    p_r_target.add_argument("--enabled", default="true")
+    p_r_target.add_argument("--description", default="")
+    p_r_target.add_argument("--no-apply", action="store_true")
 
     p_r_update = sub.add_parser("route-update", help="Update an existing route")
     p_r_update.add_argument("route_id", help="Route ID")
@@ -623,6 +753,10 @@ def main() -> int:
     p_r_update.add_argument("--upstream-scheme", default=None)
     p_r_update.add_argument("--upstream-host", default=None)
     p_r_update.add_argument("--upstream-port", type=int, default=None)
+    p_r_update.add_argument("--target-id", default=None)
+    p_r_update.add_argument("--container", default=None)
+    p_r_update.add_argument("--port", type=int, default=None)
+    p_r_update.add_argument("--allow-self-target", action="store_true")
     p_r_update.add_argument("--enabled", default=None)
     p_r_update.add_argument("--description", default=None)
     p_r_update.add_argument("--no-apply", action="store_true")
@@ -656,6 +790,41 @@ def main() -> int:
     p_r_apply.add_argument("--raw-candidate-config", default=None)
     p_r_apply.add_argument("--inject-invalid-directive", default=None)
     p_r_apply.add_argument("--simulate-reload-failure", action="store_true")
+
+    p_d_status = sub.add_parser(
+        "discovery-status", help="Show Docker discovery status and availability"
+    )
+    p_d_status.add_argument("--no-refresh", action="store_true")
+
+    p_d_containers = sub.add_parser(
+        "discovery-containers", help="List discovered Docker containers"
+    )
+    p_d_containers.add_argument("--include-self", action="store_true")
+    p_d_containers.add_argument("--state", default=None)
+    p_d_containers.add_argument("--scope", default="project")
+
+    p_d_targets = sub.add_parser(
+        "discovery-targets",
+        help="List discovered Docker container + port upstream target candidates",
+    )
+    p_d_targets.add_argument("--include-self", action="store_true")
+    p_d_targets.add_argument("--include-stopped", action="store_true")
+    p_d_targets.add_argument("--scope", default="project")
+
+    p_d_refresh = sub.add_parser(
+        "discovery-refresh",
+        help="Explicitly refresh Docker containers and upstream target candidates",
+    )
+    p_d_refresh.add_argument("--include-self", action="store_true")
+    p_d_refresh.add_argument("--include-stopped", action="store_true")
+    p_d_refresh.add_argument("--scope", default="project")
+
+    p_d_config = sub.add_parser(
+        "discovery-config",
+        help="Configure or reset Docker socket path override",
+    )
+    p_d_config.add_argument("--socket-path-override", default=None)
+    p_d_config.add_argument("--reset", action="store_true")
 
     p_replay = sub.add_parser("replay", help="Semantically replay a complete capture record")
     p_replay.add_argument("capture_id", help="Capture ID to replay")
@@ -710,7 +879,7 @@ def main() -> int:
         return cmd_route_get(args)
     if args.subcommand == "route-status":
         return cmd_route_status(args)
-    if args.subcommand == "route-create":
+    if args.subcommand in ("route-create", "route-create-from-target"):
         return cmd_route_create(args)
     if args.subcommand == "route-update":
         return cmd_route_update(args)
@@ -724,6 +893,16 @@ def main() -> int:
         return cmd_route_delete(args)
     if args.subcommand == "route-apply":
         return cmd_route_apply(args)
+    if args.subcommand == "discovery-status":
+        return cmd_discovery_status(args)
+    if args.subcommand == "discovery-containers":
+        return cmd_discovery_containers(args)
+    if args.subcommand == "discovery-targets":
+        return cmd_discovery_targets(args)
+    if args.subcommand == "discovery-refresh":
+        return cmd_discovery_refresh(args)
+    if args.subcommand == "discovery-config":
+        return cmd_discovery_config(args)
     if args.subcommand == "replay":
         return cmd_replay(args)
     return 1

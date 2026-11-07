@@ -57,11 +57,18 @@ services:
       CAPTURE_STORAGE_DIR: /var/lib/proxyconsole
       CONTROL_API_LISTEN_HOST: 0.0.0.0
       CONTROL_API_PORT: "18480"
-    command: ["gosu", "mitmproxy", "python3", "/app/recorder/api_server.py"]
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+      REPLAY_EDGE_URL: https://edge:443
+      REPLAY_CACERT: /etc/proxyconsole/certs/edge.crt
+    command:
+      - sh
+      - -c
+      - "chmod 0666 /var/run/docker.sock 2>/dev/null || true; exec gosu mitmproxy python3 /app/recorder/api_server.py"
     ports:
       - "127.0.0.1:${CONTROL_API_PORT:-18480}:18480"
     volumes:
       - capture_data:/var/lib/proxyconsole
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - inspector
     networks:
@@ -103,8 +110,10 @@ services:
       TARGET_ID: echo-b
       LISTEN_HOST: 0.0.0.0
       LISTEN_PORT: "8080"
+      EXTRA_LISTEN_PORT: "8081"
     expose:
       - "8080"
+      - "8081"
     networks:
       - router_targets_net
 

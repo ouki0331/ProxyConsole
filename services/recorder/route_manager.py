@@ -124,10 +124,50 @@ class RouteManager:
             finally:
                 os.close(fd)
 
-    def _row_to_dict(self, row: Any) -> dict[str, Any]:
+    def _row_to_dict(
+        self,
+        row: Any,
+        container_states: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         scheme = str(row["upstream_scheme"])
         host = str(row["upstream_host"])
         port = int(row["upstream_port"])
+        raw_meta = (
+            row["target_metadata_json"]
+            if "target_metadata_json" in row.keys()
+            else None
+        )
+        target_metadata: dict[str, Any] | None = None
+        if raw_meta:
+            try:
+                parsed = json.loads(str(raw_meta))
+                if isinstance(parsed, dict):
+                    target_metadata = parsed
+            except Exception:
+                target_metadata = None
+
+        target_state = "unknown"
+        target_container_id = (
+            target_metadata.get("container_id") if target_metadata else None
+        )
+        if container_states is not None and len(container_states) > 0:
+            matched_info = None
+            lookup_keys = [host]
+            if target_metadata:
+                for k in ("service_name", "container_name", "container_id"):
+                    val = target_metadata.get(k)
+                    if val:
+                        lookup_keys.insert(0, str(val))
+            for lk in lookup_keys:
+                if lk in container_states:
+                    matched_info = container_states[lk]
+                    break
+            if matched_info is not None:
+                target_state = str(matched_info["state"])
+                target_container_id = matched_info["container_id"]
+            elif target_metadata is not None:
+                target_state = "stopped"
+
         return {
             "route_id": str(row["route_id"]),
             "domain": str(row["domain"]),
@@ -137,6 +177,9 @@ class RouteManager:
             "upstream_url": f"{scheme}://{host}:{port}",
             "enabled": bool(row["enabled"]),
             "copied_from_route_id": row["copied_from_route_id"],
+            "target_metadata": target_metadata,
+            "target_state": target_state,
+            "target_container_id": target_container_id,
             "description": str(row["description"] or ""),
             "created_at": str(row["created_at"]),
             "updated_at": str(row["updated_at"]),
@@ -255,7 +298,8 @@ class RouteManager:
                 """,
                 params,
             ).fetchall()
-        items = [self._row_to_dict(r) for r in rows]
+        container_states = self.store.discovery.get_container_states_map()
+        items = [self._row_to_dict(r, container_states) for r in rows]
         return {
             "total": len(items),
             "items": items,
@@ -271,8 +315,9 @@ class RouteManager:
             ).fetchone()
         if row is None:
             raise RouteNotFoundError(f"Route not found: {route_id}")
+        container_states = self.store.discovery.get_container_states_map()
         return {
-            "route": self._row_to_dict(row),
+            "route": self._row_to_dict(row, container_states),
             "apply_status": self.get_apply_status(),
         }
 
@@ -382,8 +427,13 @@ class RouteManager:
         *,
         domain: str,
         upstream_scheme: str = "http",
-        upstream_host: str,
-        upstream_port: int,
+        upstream_host: str | None = None,
+        upstream_port: int | None = None,
+        target_id: str | None = None,
+        container: str | None = None,
+        port: int | None = None,
+        allow_self_target: bool = False,
+        target_metadata: dict[str, Any] | None = None,
         route_id: str | None = None,
         enabled: bool = True,
         description: str = "",
@@ -393,12 +443,35 @@ class RouteManager:
         self.store.ensure_schema()
         clean_domain = validate_domain(domain)
         clean_scheme = validate_upstream_scheme(upstream_scheme)
-        clean_host = validate_upstream_host(upstream_host)
-        clean_port = validate_upstream_port(upstream_port)
+
+        resolved_meta = target_metadata
+        if target_id or container:
+            resolved = self.store.discovery.resolve_target(
+                target_id=target_id,
+                container=container,
+                port=port if port is not None else upstream_port,
+                upstream_scheme=clean_scheme,
+                allow_self=allow_self_target,
+            )
+            clean_scheme = validate_upstream_scheme(resolved["upstream_scheme"])
+            clean_host = validate_upstream_host(resolved["upstream_host"])
+            clean_port = validate_upstream_port(resolved["upstream_port"])
+            resolved_meta = resolved["target_metadata"]
+        else:
+            clean_host = validate_upstream_host(upstream_host)
+            clean_port = validate_upstream_port(
+                upstream_port if upstream_port is not None else port
+            )
+
         clean_id = (
             validate_route_id(route_id)
             if route_id
             else f"route:{uuid.uuid4().hex[:10]}"
+        )
+        meta_json = (
+            json.dumps(resolved_meta, ensure_ascii=False)
+            if resolved_meta is not None
+            else None
         )
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -426,8 +499,8 @@ class RouteManager:
                     INSERT INTO routes (
                         route_id, domain, upstream_scheme, upstream_host,
                         upstream_port, enabled, copied_from_route_id,
-                        description, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        target_metadata_json, description, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         clean_id,
@@ -437,6 +510,7 @@ class RouteManager:
                         clean_port,
                         1 if enabled else 0,
                         copied_from_route_id,
+                        meta_json,
                         str(description or ""),
                         now_iso,
                         now_iso,
@@ -450,7 +524,8 @@ class RouteManager:
                 conn.commit()
             self.store.retention.checkpoint_wal()
 
-        route_dict = self._row_to_dict(row)
+        container_states = self.store.discovery.get_container_states_map()
+        route_dict = self._row_to_dict(row, container_states)
         apply_res = (
             self.apply_routes(
                 trigger_action=(
@@ -468,6 +543,37 @@ class RouteManager:
             "apply_result": apply_res,
         }
 
+    def create_route_from_target(
+        self,
+        *,
+        domain: str,
+        target_id: str | None = None,
+        container: str | None = None,
+        port: int | None = None,
+        upstream_scheme: str = "http",
+        allow_self_target: bool = False,
+        route_id: str | None = None,
+        enabled: bool = True,
+        description: str = "",
+        auto_apply: bool = True,
+    ) -> dict[str, Any]:
+        if not target_id and not container:
+            raise RouteValidationError(
+                "create_route_from_target requires 'target_id' or 'container' (+ 'port')"
+            )
+        return self.create_route(
+            domain=domain,
+            upstream_scheme=upstream_scheme,
+            target_id=target_id,
+            container=container,
+            port=port,
+            allow_self_target=allow_self_target,
+            route_id=route_id,
+            enabled=enabled,
+            description=description,
+            auto_apply=auto_apply,
+        )
+
     def update_route(
         self,
         route_id: str,
@@ -476,12 +582,26 @@ class RouteManager:
         upstream_scheme: str | None = None,
         upstream_host: str | None = None,
         upstream_port: int | None = None,
+        target_id: str | None = None,
+        container: str | None = None,
+        port: int | None = None,
+        allow_self_target: bool = False,
         enabled: bool | None = None,
         description: str | None = None,
         auto_apply: bool = True,
     ) -> dict[str, Any]:
         self.store.ensure_schema()
         now_iso = datetime.now(timezone.utc).isoformat()
+
+        resolved_target = None
+        if target_id or container:
+            resolved_target = self.store.discovery.resolve_target(
+                target_id=target_id,
+                container=container,
+                port=port if port is not None else upstream_port,
+                upstream_scheme=upstream_scheme or "http",
+                allow_self=allow_self_target,
+            )
 
         with self._exclusive_lock():
             with self.store._connect() as conn:
@@ -497,21 +617,50 @@ class RouteManager:
                     if domain is not None
                     else str(current["domain"])
                 )
-                new_scheme = (
-                    validate_upstream_scheme(upstream_scheme)
-                    if upstream_scheme is not None
-                    else str(current["upstream_scheme"])
-                )
-                new_host = (
-                    validate_upstream_host(upstream_host)
-                    if upstream_host is not None
-                    else str(current["upstream_host"])
-                )
-                new_port = (
-                    validate_upstream_port(upstream_port)
-                    if upstream_port is not None
-                    else int(current["upstream_port"])
-                )
+                if resolved_target is not None:
+                    new_scheme = validate_upstream_scheme(
+                        upstream_scheme
+                        if upstream_scheme is not None
+                        else resolved_target["upstream_scheme"]
+                    )
+                    new_host = validate_upstream_host(
+                        resolved_target["upstream_host"]
+                    )
+                    new_port = validate_upstream_port(
+                        resolved_target["upstream_port"]
+                    )
+                    new_meta_json = json.dumps(
+                        resolved_target["target_metadata"], ensure_ascii=False
+                    )
+                else:
+                    new_scheme = (
+                        validate_upstream_scheme(upstream_scheme)
+                        if upstream_scheme is not None
+                        else str(current["upstream_scheme"])
+                    )
+                    new_host = (
+                        validate_upstream_host(upstream_host)
+                        if upstream_host is not None
+                        else str(current["upstream_host"])
+                    )
+                    new_port = (
+                        validate_upstream_port(upstream_port)
+                        if upstream_port is not None
+                        else (
+                            validate_upstream_port(port)
+                            if port is not None
+                            else int(current["upstream_port"])
+                        )
+                    )
+                    if upstream_host is not None or upstream_port is not None:
+                        new_meta_json = None
+                    else:
+                        new_meta_json = (
+                            current["target_metadata_json"]
+                            if "target_metadata_json" in current.keys()
+                            else None
+                        )
+
                 new_enabled = (
                     bool(enabled)
                     if enabled is not None
@@ -540,6 +689,7 @@ class RouteManager:
                         upstream_host = ?,
                         upstream_port = ?,
                         enabled = ?,
+                        target_metadata_json = ?,
                         description = ?,
                         updated_at = ?
                     WHERE route_id = ?
@@ -550,6 +700,7 @@ class RouteManager:
                         new_host,
                         new_port,
                         1 if new_enabled else 0,
+                        new_meta_json,
                         new_desc,
                         now_iso,
                         route_id,
@@ -563,7 +714,8 @@ class RouteManager:
                 conn.commit()
             self.store.retention.checkpoint_wal()
 
-        route_dict = self._row_to_dict(updated_row)
+        container_states = self.store.discovery.get_container_states_map()
+        route_dict = self._row_to_dict(updated_row, container_states)
         apply_res = (
             self.apply_routes(trigger_action=f"update:{route_id}")
             if auto_apply
@@ -636,6 +788,11 @@ class RouteManager:
                 upstream_port
                 if upstream_port is not None
                 else source_info["upstream_port"]
+            ),
+            target_metadata=(
+                source_info.get("target_metadata")
+                if (upstream_host is None and upstream_port is None)
+                else None
             ),
             route_id=route_id,
             enabled=(

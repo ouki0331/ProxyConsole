@@ -8,12 +8,14 @@ import os
 import signal
 import struct
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlsplit
 
 TARGET_ID = os.environ.get("TARGET_ID", "echo-unknown")
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8080"))
+EXTRA_LISTEN_PORT = os.environ.get("EXTRA_LISTEN_PORT", "").strip()
 MAX_INLINE_BODY = int(os.environ.get("MAX_INLINE_BODY", "65536"))
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -191,6 +193,7 @@ class EchoRequestHandler(BaseHTTPRequestHandler):
 
         payload = {
             "target": TARGET_ID,
+            "listen_port": int(self.server.server_port),
             "method": self.command,
             "path": raw_path,
             "raw_query": raw_query,
@@ -239,6 +242,25 @@ class EchoRequestHandler(BaseHTTPRequestHandler):
 def main() -> None:
     signal.signal(signal.SIGTERM, lambda _signum, _frame: sys.exit(0))
     signal.signal(signal.SIGINT, lambda _signum, _frame: sys.exit(0))
+    if EXTRA_LISTEN_PORT:
+        for raw_p in EXTRA_LISTEN_PORT.split(","):
+            raw_p = raw_p.strip()
+            if not raw_p:
+                continue
+            extra_port = int(raw_p)
+            extra_srv = ThreadingHTTPServer(
+                (LISTEN_HOST, extra_port), EchoRequestHandler
+            )
+            t = threading.Thread(
+                target=extra_srv.serve_forever,
+                name=f"echo-extra-{extra_port}",
+                daemon=True,
+            )
+            t.start()
+            print(
+                f"[{TARGET_ID}] extra listener on {LISTEN_HOST}:{extra_port}",
+                flush=True,
+            )
     server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), EchoRequestHandler)
     print(f"[{TARGET_ID}] listening on {LISTEN_HOST}:{LISTEN_PORT}", flush=True)
     server.serve_forever()

@@ -13,6 +13,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from docker_discovery import (
+    DiscoveryTargetNotFoundError,
+    DiscoveryTargetValidationError,
+    DiscoveryUnavailableError,
+)
 from index_store import CaptureIndexStore
 from route_manager import (
     DuplicateDomainError,
@@ -108,6 +113,59 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
 
             if path == "/api/v1/retention/policy":
                 self._send_json(200, self.store.get_retention_policy())
+                return
+
+            if path == "/api/v1/discovery/status":
+                ref_str = _first_param(qs, "refresh")
+                do_refresh = (
+                    _parse_bool(ref_str) if ref_str is not None else True
+                )
+                self._send_json(
+                    200, self.store.discovery.get_status(refresh=do_refresh)
+                )
+                return
+
+            if path == "/api/v1/discovery/containers":
+                inc_self_str = _first_param(qs, "include_self")
+                inc_self = (
+                    _parse_bool(inc_self_str)
+                    if inc_self_str is not None
+                    else False
+                )
+                state_filter = _first_param(qs, "state")
+                scope = _first_param(qs, "scope") or "project"
+                self._send_json(
+                    200,
+                    self.store.discovery.list_containers(
+                        include_self=inc_self,
+                        state=state_filter,
+                        scope=scope,
+                    ),
+                )
+                return
+
+            if path == "/api/v1/discovery/targets":
+                inc_self_str = _first_param(qs, "include_self")
+                inc_self = (
+                    _parse_bool(inc_self_str)
+                    if inc_self_str is not None
+                    else False
+                )
+                inc_stop_str = _first_param(qs, "include_stopped")
+                inc_stop = (
+                    _parse_bool(inc_stop_str)
+                    if inc_stop_str is not None
+                    else False
+                )
+                scope = _first_param(qs, "scope") or "project"
+                self._send_json(
+                    200,
+                    self.store.discovery.list_targets(
+                        include_self=inc_self,
+                        include_stopped=inc_stop,
+                        scope=scope,
+                    ),
+                )
                 return
 
             if path == "/api/v1/routes":
@@ -275,12 +333,22 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
             if "enabled" in body and body["enabled"] is not None
             else None
         )
+        allow_self = (
+            _parse_bool(body["allow_self_target"])
+            if "allow_self_target" in body
+            and body["allow_self_target"] is not None
+            else False
+        )
         res = self.store.routes.update_route(
             route_id,
             domain=body.get("domain"),
             upstream_scheme=body.get("upstream_scheme"),
             upstream_host=body.get("upstream_host"),
             upstream_port=body.get("upstream_port"),
+            target_id=body.get("target_id"),
+            container=body.get("container"),
+            port=body.get("port"),
+            allow_self_target=allow_self,
             enabled=enabled_val,
             description=body.get("description"),
             auto_apply=auto_apply,
@@ -303,6 +371,25 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
             self._send_json(
                 404,
                 {"error": "route_not_found", "message": str(exc)},
+            )
+        except DiscoveryTargetNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "target_not_found", "message": str(exc)},
+            )
+        except DiscoveryUnavailableError as exc:
+            self._send_json(
+                503,
+                {
+                    "error": "discovery_unavailable",
+                    "message": str(exc),
+                    "fallback_manual_upstream_supported": True,
+                },
+            )
+        except DiscoveryTargetValidationError as exc:
+            self._send_json(
+                400,
+                {"error": "invalid_target", "message": str(exc)},
             )
         except DuplicateDomainError as exc:
             self._send_json(
@@ -361,7 +448,36 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
 
             body = self._read_json_body()
 
-            if path == "/api/v1/routes":
+            if path == "/api/v1/discovery/refresh":
+                inc_self = (
+                    _parse_bool(body["include_self"])
+                    if "include_self" in body and body["include_self"] is not None
+                    else False
+                )
+                inc_stop = (
+                    _parse_bool(body["include_stopped"])
+                    if "include_stopped" in body
+                    and body["include_stopped"] is not None
+                    else False
+                )
+                scope = str(body.get("scope") or "project")
+                self._send_json(
+                    200,
+                    self.store.discovery.refresh(
+                        include_self=inc_self,
+                        include_stopped=inc_stop,
+                        scope=scope,
+                    ),
+                )
+                return
+
+            if path == "/api/v1/discovery/config":
+                override = body.get("socket_path_override")
+                res = self.store.discovery.set_socket_path_override(override)
+                self._send_json(200, res)
+                return
+
+            if path in ("/api/v1/routes", "/api/v1/routes/from-target"):
                 auto_apply = (
                     _parse_bool(body["auto_apply"])
                     if "auto_apply" in body and body["auto_apply"] is not None
@@ -372,16 +488,40 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                     if "enabled" in body and body["enabled"] is not None
                     else True
                 )
-                res = self.store.routes.create_route(
-                    domain=body.get("domain", ""),
-                    upstream_scheme=body.get("upstream_scheme", "http"),
-                    upstream_host=body.get("upstream_host", ""),
-                    upstream_port=body.get("upstream_port"),
-                    route_id=body.get("route_id"),
-                    enabled=enabled,
-                    description=body.get("description", ""),
-                    auto_apply=auto_apply,
+                allow_self = (
+                    _parse_bool(body["allow_self_target"])
+                    if "allow_self_target" in body
+                    and body["allow_self_target"] is not None
+                    else False
                 )
+                if path == "/api/v1/routes/from-target":
+                    res = self.store.routes.create_route_from_target(
+                        domain=body.get("domain", ""),
+                        target_id=body.get("target_id"),
+                        container=body.get("container"),
+                        port=body.get("port"),
+                        upstream_scheme=body.get("upstream_scheme", "http"),
+                        allow_self_target=allow_self,
+                        route_id=body.get("route_id"),
+                        enabled=enabled,
+                        description=body.get("description", ""),
+                        auto_apply=auto_apply,
+                    )
+                else:
+                    res = self.store.routes.create_route(
+                        domain=body.get("domain", ""),
+                        upstream_scheme=body.get("upstream_scheme", "http"),
+                        upstream_host=body.get("upstream_host"),
+                        upstream_port=body.get("upstream_port"),
+                        target_id=body.get("target_id"),
+                        container=body.get("container"),
+                        port=body.get("port"),
+                        allow_self_target=allow_self,
+                        route_id=body.get("route_id"),
+                        enabled=enabled,
+                        description=body.get("description", ""),
+                        auto_apply=auto_apply,
+                    )
                 self._send_json(201, res)
                 return
 
@@ -498,6 +638,25 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
             self._send_json(
                 404,
                 {"error": "route_not_found", "message": str(exc)},
+            )
+        except DiscoveryTargetNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "target_not_found", "message": str(exc)},
+            )
+        except DiscoveryUnavailableError as exc:
+            self._send_json(
+                503,
+                {
+                    "error": "discovery_unavailable",
+                    "message": str(exc),
+                    "fallback_manual_upstream_supported": True,
+                },
+            )
+        except DiscoveryTargetValidationError as exc:
+            self._send_json(
+                400,
+                {"error": "invalid_target", "message": str(exc)},
             )
         except DuplicateDomainError as exc:
             self._send_json(
