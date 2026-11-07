@@ -20,6 +20,7 @@ test:
 	./tests/integration/test_route_management.sh
 	./tests/integration/test_docker_discovery.sh
 	./tests/integration/test_web_console.sh
+	./tests/integration/test_request_draft_replay.sh
 
 clean:
 	./scripts/down.sh

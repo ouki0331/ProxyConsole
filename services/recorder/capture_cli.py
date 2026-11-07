@@ -20,6 +20,12 @@ from docker_discovery import (
     DiscoveryTargetValidationError,
     DiscoveryUnavailableError,
 )
+from draft_replay import (
+    DraftExpiredError,
+    DraftNotFoundError,
+    DraftValidationError,
+    NonReplayableCaptureError,
+)
 from index_store import CaptureIndexStore
 from route_manager import (
     DuplicateDomainError,
@@ -73,6 +79,8 @@ def cmd_search(args: argparse.Namespace) -> int:
         path_prefix=args.path_prefix,
         capture_status=args.capture_status,
         response_status=args.response_status,
+        source_capture_id=getattr(args, "source_capture_id", None),
+        draft_id=getattr(args, "draft_id", None),
     )
     if getattr(args, "items_only", False):
         print(json.dumps(res["items"], ensure_ascii=False, indent=2))
@@ -600,6 +608,318 @@ def _add_search_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--path-prefix", default=None)
     p.add_argument("--capture-status", default=None)
     p.add_argument("--response-status", type=int, default=None)
+    p.add_argument("--source-capture-id", default=None)
+    p.add_argument("--draft-id", default=None)
+
+
+def _parse_kv_mutation(item: str, op: str) -> dict[str, Any]:
+    """Parse KEY=VALUE, INDEX:KEY=VALUE, or KEY@OCC=VALUE for pair mutations."""
+    if op in ("add", "append"):
+        if "=" not in item:
+            raise ValueError(f"Expected KEY=VALUE for --*-add, got: {item}")
+        k, v = item.split("=", 1)
+        return {"op": "add", "name": k, "value": v}
+    if op == "set":
+        if "=" not in item:
+            raise ValueError(f"Expected KEY=VALUE for --*-set, got: {item}")
+        lhs, v = item.split("=", 1)
+        if lhs.startswith("#"):
+            idx = int(lhs[1:])
+            return {"op": "set_at", "index": idx, "value": v}
+        if "@" in lhs:
+            k, occ_str = lhs.rsplit("@", 1)
+            return {
+                "op": "set",
+                "name": k,
+                "occurrence": int(occ_str),
+                "value": v,
+            }
+        return {"op": "set", "name": lhs, "value": v}
+    if op == "remove":
+        if item.startswith("#"):
+            return {"op": "remove_at", "index": int(item[1:])}
+        if "@" in item:
+            k, occ_str = item.rsplit("@", 1)
+            return {"op": "remove", "name": k, "occurrence": int(occ_str)}
+        return {"op": "remove", "name": item}
+    raise ValueError(f"Unknown op: {op}")
+
+
+def cmd_replayability(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.drafts.evaluate_replayability(
+            args.capture_id, raise_on_false=False
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0 if res.get("replayable") else 2
+    except FileNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "capture_not_found", "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_draft_create(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    edits = json.loads(args.edits_json) if args.edits_json else None
+    try:
+        res = store.drafts.create_draft(
+            args.capture_id,
+            draft_id=args.draft_id,
+            ttl_seconds=args.ttl_seconds,
+            expires_at=args.expires_at,
+            edits=edits,
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except FileNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "capture_not_found", "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except NonReplayableCaptureError as exc:
+        print(json.dumps(exc.to_dict(), ensure_ascii=False), file=sys.stderr)
+        return 2
+    except DraftValidationError as exc:
+        print(
+            json.dumps(
+                {"error": exc.code, "message": str(exc), **exc.details},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_draft_list(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    res = store.drafts.list_drafts(
+        source_capture_id=args.source_capture_id, limit=args.limit
+    )
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_draft_get(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.drafts.get_draft(args.draft_id, now=args.now)
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except DraftExpiredError as exc:
+        print(
+            json.dumps(
+                {
+                    "error": "draft_expired",
+                    "draft_id": exc.draft_id,
+                    "expires_at": exc.expires_at,
+                    "message": str(exc),
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except DraftNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "draft_not_found", "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_draft_update(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    updates: dict[str, Any] = (
+        json.loads(args.updates_json) if args.updates_json else {}
+    )
+    for field in (
+        "method",
+        "scheme",
+        "authority",
+        "host",
+        "raw_path",
+        "decoded_path",
+        "path",
+        "raw_query",
+        "content_type",
+        "json_text",
+        "raw_text",
+        "raw_base64",
+        "ttl_seconds",
+        "expires_at",
+    ):
+        val = getattr(args, field, None)
+        if val is not None:
+            updates[field] = val
+
+    q_muts = list(updates.get("query_mutations") or [])
+    for item in args.query_add:
+        q_muts.append(_parse_kv_mutation(item, "add"))
+    for item in args.query_set:
+        q_muts.append(_parse_kv_mutation(item, "set"))
+    for item in args.query_remove:
+        q_muts.append(_parse_kv_mutation(item, "remove"))
+    if q_muts:
+        updates["query_mutations"] = q_muts
+
+    h_muts = list(updates.get("header_mutations") or [])
+    for item in args.header_add:
+        h_muts.append(_parse_kv_mutation(item, "add"))
+    for item in args.header_set:
+        h_muts.append(_parse_kv_mutation(item, "set"))
+    for item in args.header_remove:
+        h_muts.append(_parse_kv_mutation(item, "remove"))
+    if h_muts:
+        updates["header_mutations"] = h_muts
+
+    c_muts = list(updates.get("cookie_mutations") or [])
+    for item in args.cookie_add:
+        c_muts.append(_parse_kv_mutation(item, "add"))
+    for item in args.cookie_set:
+        c_muts.append(_parse_kv_mutation(item, "set"))
+    for item in args.cookie_remove:
+        c_muts.append(_parse_kv_mutation(item, "remove"))
+    if c_muts:
+        updates["cookie_mutations"] = c_muts
+
+    j_muts = list(updates.get("json_mutations") or [])
+    for item in args.json_set:
+        if "=" not in item:
+            raise ValueError(f"Expected PATH=JSON_VALUE for --json-set, got: {item}")
+        p_str, v_str = item.split("=", 1)
+        try:
+            parsed_v = json.loads(v_str)
+        except Exception:
+            parsed_v = v_str
+        j_muts.append({"op": "set", "path": p_str, "value": parsed_v})
+    for p_str in args.json_delete:
+        j_muts.append({"op": "delete", "path": p_str})
+    if j_muts:
+        updates["json_mutations"] = j_muts
+
+    f_muts = list(updates.get("form_mutations") or [])
+    for item in args.form_add:
+        f_muts.append(_parse_kv_mutation(item, "add"))
+    for item in args.form_set:
+        f_muts.append(_parse_kv_mutation(item, "set"))
+    for item in args.form_remove:
+        f_muts.append(_parse_kv_mutation(item, "remove"))
+    if f_muts:
+        updates["form_mutations"] = f_muts
+
+    try:
+        res = store.drafts.update_draft(args.draft_id, updates)
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except DraftExpiredError as exc:
+        print(
+            json.dumps(
+                {
+                    "error": "draft_expired",
+                    "draft_id": exc.draft_id,
+                    "expires_at": exc.expires_at,
+                    "message": str(exc),
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except DraftNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "draft_not_found", "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except DraftValidationError as exc:
+        print(
+            json.dumps(
+                {"error": exc.code, "message": str(exc), **exc.details},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_draft_delete(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.drafts.delete_draft(args.draft_id)
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except DraftNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "draft_not_found", "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_draft_export(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.drafts.export_draft(
+            args.draft_id,
+            format_type=args.format,
+            edge_url=args.edge_url,
+            cacert=args.cacert,
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except (DraftNotFoundError, DraftExpiredError) as exc:
+        print(
+            json.dumps(
+                {"error": "draft_not_found", "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_draft_replay(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.drafts.replay_draft(
+            args.draft_id,
+            edge_url=args.edge_url,
+            cacert=args.cacert or None,
+            override_host=args.override_host or None,
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except NonReplayableCaptureError as exc:
+        print(json.dumps(exc.to_dict(), ensure_ascii=False), file=sys.stderr)
+        return 2
+    except (DraftNotFoundError, DraftExpiredError) as exc:
+        print(
+            json.dumps(
+                {"error": "draft_not_found", "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
 
 
 def main() -> int:
@@ -856,6 +1176,91 @@ def main() -> int:
         help="Modify a single URL-encoded form parameter (KEY=VALUE)",
     )
 
+    p_rpl_check = sub.add_parser(
+        "replayability",
+        help="Check whether a capture record is replayable and return explicit reason if not",
+    )
+    p_rpl_check.add_argument("capture_id", help="Capture ID")
+
+    p_dr_create = sub.add_parser(
+        "draft-create", help="Create a persistent editable draft from a replayable capture"
+    )
+    p_dr_create.add_argument("capture_id", help="Source capture ID")
+    p_dr_create.add_argument("--draft-id", default=None)
+    p_dr_create.add_argument("--ttl-seconds", type=float, default=None)
+    p_dr_create.add_argument("--expires-at", default=None)
+    p_dr_create.add_argument("--edits-json", default=None)
+
+    p_dr_list = sub.add_parser("draft-list", help="List active request drafts")
+    p_dr_list.add_argument("--source-capture-id", default=None)
+    p_dr_list.add_argument("--limit", type=int, default=100)
+
+    p_dr_get = sub.add_parser("draft-get", help="Get a request draft by ID")
+    p_dr_get.add_argument("draft_id", help="Draft ID")
+    p_dr_get.add_argument("--now", default=None)
+
+    p_dr_update = sub.add_parser(
+        "draft-update", help="Update a request draft with structured or raw edits"
+    )
+    p_dr_update.add_argument("draft_id", help="Draft ID")
+    p_dr_update.add_argument("--method", default=None)
+    p_dr_update.add_argument("--scheme", default=None)
+    p_dr_update.add_argument("--authority", default=None)
+    p_dr_update.add_argument("--host", default=None)
+    p_dr_update.add_argument("--raw-path", default=None)
+    p_dr_update.add_argument("--decoded-path", default=None)
+    p_dr_update.add_argument("--path", default=None)
+    p_dr_update.add_argument("--raw-query", default=None)
+    p_dr_update.add_argument("--content-type", default=None)
+    p_dr_update.add_argument("--query-add", action="append", default=[])
+    p_dr_update.add_argument("--query-set", action="append", default=[])
+    p_dr_update.add_argument("--query-remove", action="append", default=[])
+    p_dr_update.add_argument("--header-add", action="append", default=[])
+    p_dr_update.add_argument("--header-set", action="append", default=[])
+    p_dr_update.add_argument("--header-remove", action="append", default=[])
+    p_dr_update.add_argument("--cookie-add", action="append", default=[])
+    p_dr_update.add_argument("--cookie-set", action="append", default=[])
+    p_dr_update.add_argument("--cookie-remove", action="append", default=[])
+    p_dr_update.add_argument("--json-text", default=None)
+    p_dr_update.add_argument("--json-set", action="append", default=[])
+    p_dr_update.add_argument("--json-delete", action="append", default=[])
+    p_dr_update.add_argument("--form-add", action="append", default=[])
+    p_dr_update.add_argument("--form-set", action="append", default=[])
+    p_dr_update.add_argument("--form-remove", action="append", default=[])
+    p_dr_update.add_argument("--raw-text", default=None)
+    p_dr_update.add_argument("--raw-base64", default=None)
+    p_dr_update.add_argument("--ttl-seconds", type=float, default=None)
+    p_dr_update.add_argument("--expires-at", default=None)
+    p_dr_update.add_argument("--updates-json", default=None)
+
+    p_dr_delete = sub.add_parser("draft-delete", help="Delete a request draft")
+    p_dr_delete.add_argument("draft_id", help="Draft ID")
+
+    p_dr_export = sub.add_parser(
+        "draft-export", help="Export a request draft as cURL and browser fetch JS"
+    )
+    p_dr_export.add_argument("draft_id", help="Draft ID")
+    p_dr_export.add_argument(
+        "--format", choices=["all", "curl", "fetch"], default="all"
+    )
+    p_dr_export.add_argument("--edge-url", default=None)
+    p_dr_export.add_argument("--cacert", default=None)
+
+    p_dr_replay = sub.add_parser(
+        "draft-replay",
+        help="Normalize and replay a request draft through the proxy chain",
+    )
+    p_dr_replay.add_argument("draft_id", help="Draft ID")
+    p_dr_replay.add_argument(
+        "--edge-url",
+        default=os.environ.get("REPLAY_EDGE_URL", "https://edge:443"),
+    )
+    p_dr_replay.add_argument(
+        "--cacert",
+        default=os.environ.get("REPLAY_CACERT", ""),
+    )
+    p_dr_replay.add_argument("--override-host", default="")
+
     args = parser.parse_args()
     if args.subcommand in ("list", "search"):
         return cmd_search(args)
@@ -905,6 +1310,22 @@ def main() -> int:
         return cmd_discovery_config(args)
     if args.subcommand == "replay":
         return cmd_replay(args)
+    if args.subcommand == "replayability":
+        return cmd_replayability(args)
+    if args.subcommand == "draft-create":
+        return cmd_draft_create(args)
+    if args.subcommand == "draft-list":
+        return cmd_draft_list(args)
+    if args.subcommand == "draft-get":
+        return cmd_draft_get(args)
+    if args.subcommand == "draft-update":
+        return cmd_draft_update(args)
+    if args.subcommand == "draft-delete":
+        return cmd_draft_delete(args)
+    if args.subcommand == "draft-export":
+        return cmd_draft_export(args)
+    if args.subcommand == "draft-replay":
+        return cmd_draft_replay(args)
     return 1
 
 

@@ -19,6 +19,12 @@ from docker_discovery import (
     DiscoveryTargetValidationError,
     DiscoveryUnavailableError,
 )
+from draft_replay import (
+    DraftExpiredError,
+    DraftNotFoundError,
+    DraftValidationError,
+    NonReplayableCaptureError,
+)
 from index_store import CaptureIndexStore
 from route_manager import (
     DuplicateDomainError,
@@ -282,6 +288,8 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 capture_status = _first_param(qs, "capture_status") or _first_param(
                     qs, "status"
                 )
+                source_capture_id = _first_param(qs, "source_capture_id")
+                draft_id_filter = _first_param(qs, "draft_id")
 
                 result = self.store.query_captures(
                     limit=limit,
@@ -296,8 +304,115 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                     path_prefix=path_prefix,
                     capture_status=capture_status,
                     response_status=resp_status,
+                    source_capture_id=source_capture_id,
+                    draft_id=draft_id_filter,
                 )
                 self._send_json(200, result)
+                return
+
+            if path == "/api/v1/drafts":
+                src_cid = _first_param(qs, "source_capture_id") or _first_param(
+                    qs, "capture_id"
+                )
+                limit_str = _first_param(qs, "limit")
+                limit = int(limit_str) if limit_str is not None else 100
+                self._send_json(
+                    200,
+                    self.store.drafts.list_drafts(
+                        source_capture_id=src_cid, limit=limit
+                    ),
+                )
+                return
+
+            if path.startswith("/api/v1/drafts/"):
+                rest = path[len("/api/v1/drafts/") :]
+                if rest.endswith("/export"):
+                    draft_id = unquote(rest[: -len("/export")])
+                    fmt = _first_param(qs, "format") or "all"
+                    edge_url = _first_param(qs, "edge_url")
+                    cacert = _first_param(qs, "cacert")
+                    try:
+                        self._send_json(
+                            200,
+                            self.store.drafts.export_draft(
+                                draft_id,
+                                format_type=fmt,
+                                edge_url=edge_url,
+                                cacert=cacert,
+                            ),
+                        )
+                    except DraftExpiredError as exc:
+                        self._send_json(
+                            404,
+                            {
+                                "error": "draft_expired",
+                                "draft_id": exc.draft_id,
+                                "expires_at": exc.expires_at,
+                                "message": str(exc),
+                            },
+                        )
+                    except DraftNotFoundError as exc:
+                        self._send_json(
+                            404,
+                            {
+                                "error": "draft_not_found",
+                                "draft_id": draft_id,
+                                "message": str(exc),
+                            },
+                        )
+                    return
+
+                draft_id = unquote(rest)
+                now_param = _first_param(qs, "now")
+                try:
+                    self._send_json(
+                        200,
+                        self.store.drafts.get_draft(draft_id, now=now_param),
+                    )
+                except DraftExpiredError as exc:
+                    self._send_json(
+                        404,
+                        {
+                            "error": "draft_expired",
+                            "draft_id": exc.draft_id,
+                            "expires_at": exc.expires_at,
+                            "message": str(exc),
+                        },
+                    )
+                except DraftNotFoundError as exc:
+                    self._send_json(
+                        404,
+                        {
+                            "error": "draft_not_found",
+                            "draft_id": draft_id,
+                            "message": str(exc),
+                        },
+                    )
+                return
+
+            if (
+                path.startswith("/api/v1/captures/")
+                and path.endswith("/replayability")
+            ):
+                capture_id = unquote(
+                    path[len("/api/v1/captures/") : -len("/replayability")]
+                )
+                try:
+                    self._send_json(
+                        200,
+                        self.store.drafts.evaluate_replayability(
+                            capture_id, raise_on_false=False
+                        ),
+                    )
+                except FileNotFoundError as exc:
+                    self._send_json(
+                        404,
+                        {
+                            "error": "capture_not_found",
+                            "capture_id": capture_id,
+                            "message": str(exc),
+                        },
+                    )
                 return
 
             if path.startswith("/api/v1/captures/"):
@@ -418,7 +533,37 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 route_id = unquote(path[len("/api/v1/routes/") :])
                 self._handle_route_update(route_id)
                 return
+            if path.startswith("/api/v1/drafts/"):
+                draft_id = unquote(path[len("/api/v1/drafts/") :])
+                body = self._read_json_body()
+                res = self.store.drafts.update_draft(draft_id, body)
+                self._send_json(200, res)
+                return
             self._send_json(404, {"error": "not_found", "path": path})
+        except DraftExpiredError as exc:
+            self._send_json(
+                404,
+                {
+                    "error": "draft_expired",
+                    "draft_id": exc.draft_id,
+                    "expires_at": exc.expires_at,
+                    "message": str(exc),
+                },
+            )
+        except DraftNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "draft_not_found", "message": str(exc)},
+            )
+        except DraftValidationError as exc:
+            self._send_json(
+                400,
+                {
+                    "error": exc.code,
+                    "message": str(exc),
+                    **exc.details,
+                },
+            )
         except RouteNotFoundError as exc:
             self._send_json(
                 404,
@@ -476,7 +621,17 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 )
                 self._send_json(200, res)
                 return
+            if path.startswith("/api/v1/drafts/"):
+                draft_id = unquote(path[len("/api/v1/drafts/") :])
+                res = self.store.drafts.delete_draft(draft_id)
+                self._send_json(200, res)
+                return
             self._send_json(404, {"error": "not_found", "path": path})
+        except DraftNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "draft_not_found", "message": str(exc)},
+            )
         except RouteNotFoundError as exc:
             self._send_json(
                 404,
@@ -685,7 +840,133 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 self._send_json(200, res)
                 return
 
+            if path == "/api/v1/drafts":
+                cap_id = body.get("capture_id") or body.get("source_capture_id")
+                if not cap_id:
+                    raise DraftValidationError(
+                        "Creating a draft requires 'capture_id' (or 'source_capture_id')",
+                        code="missing_capture_id",
+                    )
+                res = self.store.drafts.create_draft(
+                    str(cap_id),
+                    draft_id=body.get("draft_id"),
+                    ttl_seconds=body.get("ttl_seconds"),
+                    expires_at=body.get("expires_at"),
+                    edits=body.get("edits"),
+                )
+                self._send_json(201, res)
+                return
+
+            if path == "/api/v1/drafts/prune":
+                now_param = _first_param(qs, "now") or body.get("now")
+                res = self.store.drafts.prune_expired_drafts(
+                    now=str(now_param) if now_param else None
+                )
+                self._send_json(200, res)
+                return
+
+            if (
+                path.startswith("/api/v1/captures/")
+                and path.endswith("/drafts")
+            ):
+                cap_id = unquote(
+                    path[len("/api/v1/captures/") : -len("/drafts")]
+                )
+                res = self.store.drafts.create_draft(
+                    cap_id,
+                    draft_id=body.get("draft_id"),
+                    ttl_seconds=body.get("ttl_seconds"),
+                    expires_at=body.get("expires_at"),
+                    edits=body.get("edits"),
+                )
+                self._send_json(201, res)
+                return
+
+            if (
+                path.startswith("/api/v1/captures/")
+                and path.endswith("/replay")
+            ):
+                cap_id = unquote(
+                    path[len("/api/v1/captures/") : -len("/replay")]
+                )
+                res = self.store.drafts.replay_capture(
+                    cap_id,
+                    edge_url=body.get("edge_url"),
+                    cacert=body.get("cacert"),
+                    override_host=body.get("override_host"),
+                )
+                self._send_json(200, res)
+                return
+
+            if (
+                path.startswith("/api/v1/drafts/")
+                and path.endswith("/replay")
+            ):
+                draft_id = unquote(
+                    path[len("/api/v1/drafts/") : -len("/replay")]
+                )
+                res = self.store.drafts.replay_draft(
+                    draft_id,
+                    edge_url=body.get("edge_url"),
+                    cacert=body.get("cacert"),
+                    override_host=body.get("override_host"),
+                )
+                self._send_json(200, res)
+                return
+
+            if (
+                path.startswith("/api/v1/drafts/")
+                and path.endswith("/export")
+            ):
+                draft_id = unquote(
+                    path[len("/api/v1/drafts/") : -len("/export")]
+                )
+                fmt = (
+                    _first_param(qs, "format")
+                    or body.get("format")
+                    or "all"
+                )
+                res = self.store.drafts.export_draft(
+                    draft_id,
+                    format_type=str(fmt),
+                    edge_url=body.get("edge_url") or _first_param(qs, "edge_url"),
+                    cacert=body.get("cacert") or _first_param(qs, "cacert"),
+                )
+                self._send_json(200, res)
+                return
+
             self._send_json(404, {"error": "not_found", "path": path})
+        except FileNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "capture_not_found", "message": str(exc)},
+            )
+        except DraftExpiredError as exc:
+            self._send_json(
+                404,
+                {
+                    "error": "draft_expired",
+                    "draft_id": exc.draft_id,
+                    "expires_at": exc.expires_at,
+                    "message": str(exc),
+                },
+            )
+        except DraftNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "draft_not_found", "message": str(exc)},
+            )
+        except NonReplayableCaptureError as exc:
+            self._send_json(400, exc.to_dict())
+        except DraftValidationError as exc:
+            self._send_json(
+                400,
+                {
+                    "error": exc.code,
+                    "message": str(exc),
+                    **exc.details,
+                },
+            )
         except RouteNotFoundError as exc:
             self._send_json(
                 404,

@@ -8,15 +8,17 @@ be deleted and rebuilt idempotently at any time.
 
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Iterator
 
 from docker_discovery import DockerDiscoveryService
+from draft_replay import DraftReplayManager
 from parser import build_derived_views
 from retention import (
     DEFAULT_HARD_LIMIT_BYTES,
@@ -28,11 +30,74 @@ from retention import (
 )
 from route_manager import RouteManager
 
-INDEX_SCHEMA_VERSION = 4
+INDEX_SCHEMA_VERSION = 5
 MIGRATION_NAME = "001_capture_index.sql"
 RETENTION_MIGRATION_NAME = "002_retention_policy.sql"
 ROUTES_MIGRATION_NAME = "003_routes.sql"
 DISCOVERY_MIGRATION_NAME = "004_discovery.sql"
+DRAFTS_MIGRATION_NAME = "005_request_drafts.sql"
+
+DEFAULT_DRAFTS_MIGRATION_SQL = """
+CREATE TABLE IF NOT EXISTS request_drafts (
+    draft_id TEXT PRIMARY KEY,
+    source_capture_id TEXT NOT NULL,
+    method TEXT NOT NULL,
+    scheme TEXT NOT NULL,
+    authority TEXT NOT NULL,
+    host TEXT NOT NULL,
+    raw_path TEXT NOT NULL,
+    decoded_path TEXT NOT NULL,
+    raw_query TEXT NOT NULL,
+    query_entries_json TEXT NOT NULL,
+    http_version TEXT NOT NULL DEFAULT 'HTTP/1.1',
+    headers_json TEXT NOT NULL,
+    cookies_json TEXT NOT NULL,
+    body_mode TEXT NOT NULL,
+    content_type TEXT,
+    body_base64 TEXT NOT NULL DEFAULT '',
+    body_text TEXT,
+    json_value_json TEXT,
+    form_fields_json TEXT,
+    multipart_view_json TEXT,
+    parse_errors_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    expires_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_request_drafts_source_capture
+    ON request_drafts (source_capture_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_request_drafts_expires_at
+    ON request_drafts (expires_at);
+
+CREATE TABLE IF NOT EXISTS replay_runs (
+    replay_id TEXT PRIMARY KEY,
+    draft_id TEXT,
+    source_capture_id TEXT NOT NULL,
+    result_capture_id TEXT,
+    replayed_at TEXT NOT NULL,
+    method TEXT NOT NULL,
+    scheme TEXT NOT NULL,
+    authority TEXT NOT NULL,
+    raw_target TEXT NOT NULL,
+    request_body_size INTEGER NOT NULL,
+    request_body_sha256 TEXT NOT NULL,
+    response_status INTEGER,
+    duration_ms REAL,
+    side_effect_warning_json TEXT NOT NULL,
+    error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_replay_runs_draft_id
+    ON replay_runs (draft_id, replayed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_replay_runs_source_capture
+    ON replay_runs (source_capture_id, replayed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_replay_runs_result_capture
+    ON replay_runs (result_capture_id);
+"""
 
 DEFAULT_DISCOVERY_MIGRATION_SQL = """
 CREATE TABLE IF NOT EXISTS discovery_status (
@@ -276,18 +341,30 @@ class CaptureIndexStore:
                 "/app/migrations/004_discovery.sql",
             )
         )
+        self.drafts_migration_path = Path(
+            os.environ.get(
+                "DRAFTS_MIGRATION_FILE",
+                "/app/migrations/005_request_drafts.sql",
+            )
+        )
         self.retention = RetentionEngine(self)
         self.routes = RouteManager(self)
         self.discovery = DockerDiscoveryService(self)
+        self.drafts = DraftReplayManager(self)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextlib.contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path), timeout=10.0)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-        conn.execute("PRAGMA busy_timeout=5000;")
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.execute("PRAGMA busy_timeout=5000;")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def ensure_schema(self) -> None:
         sql_text_001 = DEFAULT_MIGRATION_SQL
@@ -306,11 +383,16 @@ class CaptureIndexStore:
         if self.discovery_migration_path.is_file():
             sql_text_004 = self.discovery_migration_path.read_text(encoding="utf-8")
 
+        sql_text_005 = DEFAULT_DRAFTS_MIGRATION_SQL
+        if self.drafts_migration_path.is_file():
+            sql_text_005 = self.drafts_migration_path.read_text(encoding="utf-8")
+
         with self._connect() as conn:
             conn.executescript(sql_text_001)
             conn.executescript(sql_text_002)
             conn.executescript(sql_text_003)
             conn.executescript(sql_text_004)
+            conn.executescript(sql_text_005)
             route_cols = {
                 r["name"]
                 for r in conn.execute("PRAGMA table_info(routes)").fetchall()
@@ -351,6 +433,14 @@ class CaptureIndexStore:
                 ON CONFLICT(version) DO NOTHING
                 """,
                 (DISCOVERY_MIGRATION_NAME, now_iso),
+            )
+            conn.execute(
+                """
+                INSERT INTO schema_migrations (version, name, applied_at)
+                VALUES (5, ?, ?)
+                ON CONFLICT(version) DO NOTHING
+                """,
+                (DRAFTS_MIGRATION_NAME, now_iso),
             )
             conn.execute(
                 """
@@ -694,11 +784,25 @@ class CaptureIndexStore:
         }
 
     def rebuild_index(self) -> dict[str, Any]:
+        if self.db_path.is_file():
+            try:
+                self.ensure_schema()
+                with self._connect() as conn:
+                    conn.execute("DELETE FROM captures_index")
+                    conn.execute("DELETE FROM capture_import_errors")
+                res = self.import_all_captures()
+                res["rebuilt"] = True
+                return res
+            except sqlite3.DatabaseError:
+                pass
+
         saved_policy = None
         saved_runs: list[dict[str, Any]] = []
         saved_routes: list[dict[str, Any]] = []
         saved_route_state = None
         saved_route_runs: list[dict[str, Any]] = []
+        saved_drafts: list[dict[str, Any]] = []
+        saved_replay_runs: list[dict[str, Any]] = []
         if self.db_path.is_file():
             try:
                 with self._connect() as conn:
@@ -724,6 +828,14 @@ class CaptureIndexStore:
                         "SELECT * FROM route_apply_runs ORDER BY apply_id ASC"
                     ).fetchall()
                     saved_route_runs = [dict(r) for r in rr_rows]
+                    dr_rows = conn.execute(
+                        "SELECT * FROM request_drafts ORDER BY created_at ASC"
+                    ).fetchall()
+                    saved_drafts = [dict(r) for r in dr_rows]
+                    rpl_rows = conn.execute(
+                        "SELECT * FROM replay_runs ORDER BY replayed_at ASC"
+                    ).fetchall()
+                    saved_replay_runs = [dict(r) for r in rpl_rows]
             except Exception:
                 pass
 
@@ -739,6 +851,8 @@ class CaptureIndexStore:
             or saved_route_state is not None
             or saved_routes
             or saved_route_runs
+            or saved_drafts
+            or saved_replay_runs
         ):
             with self._connect() as conn:
                 if saved_policy is not None:
@@ -872,6 +986,80 @@ class CaptureIndexStore:
                             rr["enabled_routes_count"],
                         ),
                     )
+                for dr in saved_drafts:
+                    conn.execute(
+                        """
+                        INSERT INTO request_drafts (
+                            draft_id, source_capture_id, method, scheme, authority, host,
+                            raw_path, decoded_path, raw_query, query_entries_json,
+                            http_version, headers_json, cookies_json, body_mode,
+                            content_type, body_base64, body_text, json_value_json,
+                            form_fields_json, multipart_view_json, parse_errors_json,
+                            created_at, updated_at, expires_at
+                        ) VALUES (
+                            ?, ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?,
+                            ?, ?, ?, ?,
+                            ?, ?, ?, ?,
+                            ?, ?, ?,
+                            ?, ?, ?
+                        )
+                        """,
+                        (
+                            dr["draft_id"],
+                            dr["source_capture_id"],
+                            dr["method"],
+                            dr["scheme"],
+                            dr["authority"],
+                            dr["host"],
+                            dr["raw_path"],
+                            dr["decoded_path"],
+                            dr["raw_query"],
+                            dr["query_entries_json"],
+                            dr["http_version"],
+                            dr["headers_json"],
+                            dr["cookies_json"],
+                            dr["body_mode"],
+                            dr["content_type"],
+                            dr["body_base64"],
+                            dr["body_text"],
+                            dr["json_value_json"],
+                            dr["form_fields_json"],
+                            dr["multipart_view_json"],
+                            dr["parse_errors_json"],
+                            dr["created_at"],
+                            dr["updated_at"],
+                            dr["expires_at"],
+                        ),
+                    )
+                for rpl in saved_replay_runs:
+                    conn.execute(
+                        """
+                        INSERT INTO replay_runs (
+                            replay_id, draft_id, source_capture_id, result_capture_id,
+                            replayed_at, method, scheme, authority, raw_target,
+                            request_body_size, request_body_sha256, response_status,
+                            duration_ms, side_effect_warning_json, error_message
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            rpl["replay_id"],
+                            rpl["draft_id"],
+                            rpl["source_capture_id"],
+                            rpl["result_capture_id"],
+                            rpl["replayed_at"],
+                            rpl["method"],
+                            rpl["scheme"],
+                            rpl["authority"],
+                            rpl["raw_target"],
+                            rpl["request_body_size"],
+                            rpl["request_body_sha256"],
+                            rpl["response_status"],
+                            rpl["duration_ms"],
+                            rpl["side_effect_warning_json"],
+                            rpl["error_message"],
+                        ),
+                    )
                 conn.commit()
 
         result = self.import_all_captures()
@@ -921,6 +1109,8 @@ class CaptureIndexStore:
         path_prefix: str | None = None,
         capture_status: str | None = None,
         response_status: int | None = None,
+        source_capture_id: str | None = None,
+        draft_id: str | None = None,
     ) -> dict[str, Any]:
         self.ensure_schema()
 
@@ -974,6 +1164,18 @@ class CaptureIndexStore:
             where_clauses.append("response_status = ?")
             params.append(int(response_status))
 
+        if source_capture_id:
+            where_clauses.append(
+                "capture_id IN (SELECT result_capture_id FROM replay_runs WHERE source_capture_id = ? AND result_capture_id IS NOT NULL)"
+            )
+            params.append(source_capture_id.strip())
+
+        if draft_id:
+            where_clauses.append(
+                "capture_id IN (SELECT result_capture_id FROM replay_runs WHERE draft_id = ? AND result_capture_id IS NOT NULL)"
+            )
+            params.append(draft_id.strip())
+
         where_sql = (
             "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
         )
@@ -1012,11 +1214,33 @@ class CaptureIndexStore:
                 "FROM capture_import_errors ORDER BY record_file ASC"
             ).fetchall()
 
+            rpl_map: dict[str, dict[str, Any]] = {}
+            if rows:
+                cids = [r["capture_id"] for r in rows]
+                placeholders = ",".join("?" for _ in cids)
+                rpl_rows = conn.execute(
+                    f"""
+                    SELECT replay_id, draft_id, source_capture_id, result_capture_id, replayed_at
+                    FROM replay_runs
+                    WHERE result_capture_id IN ({placeholders})
+                    """,
+                    cids,
+                ).fetchall()
+                for rr in rpl_rows:
+                    rpl_map[rr["result_capture_id"]] = {
+                        "is_replay": True,
+                        "replay_id": rr["replay_id"],
+                        "source_capture_id": rr["source_capture_id"],
+                        "draft_id": rr["draft_id"],
+                        "replayed_at": rr["replayed_at"],
+                    }
+
         items: list[dict[str, Any]] = []
         for r in rows:
+            cid = r["capture_id"]
             items.append(
                 {
-                    "capture_id": r["capture_id"],
+                    "capture_id": cid,
                     "schema_version": r["schema_version"],
                     "captured_at": r["captured_at"],
                     "route_id": r["route_id"],
@@ -1044,6 +1268,7 @@ class CaptureIndexStore:
                     "proxy_error": r["proxy_error"],
                     "has_parse_errors": bool(r["has_parse_errors"]),
                     "record_file": r["record_file"],
+                    "replay_lineage": rpl_map.get(cid),
                 }
             )
 
@@ -1062,6 +1287,8 @@ class CaptureIndexStore:
                 "path_prefix": path_prefix,
                 "capture_status": capture_status,
                 "response_status": response_status,
+                "source_capture_id": source_capture_id,
+                "draft_id": draft_id,
             },
             "items": items,
             "import_errors_count": len(err_rows),
@@ -1120,6 +1347,12 @@ class CaptureIndexStore:
             "captured_size_matches": captured_size_matches,
             "full_body_sha256_matches": sha256_matches,
         }
+        out["replay_relations"] = self.drafts.get_capture_replay_relations(
+            capture_id
+        )
+        out["replayability"] = self.drafts.evaluate_replayability(
+            capture_id, raise_on_false=False
+        )
         return out
 
     def get_retention_policy(self) -> dict[str, Any]:
