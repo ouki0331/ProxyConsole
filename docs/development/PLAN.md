@@ -2,8 +2,8 @@
 
 更新日: 2026-11-06  
 計画状態: Active  
-現在フェーズ: P0 — 計画と作業規約  
-実装状態: 未着手
+現在フェーズ: P3 — ルート管理と Docker 発見
+実装状態: DEV-021 approved / DEV-022 in progress
 
 ## 1. バージョン目標
 
@@ -199,5 +199,5 @@ G4 不合格時:
 
 ## 7. 次に開始できるタスク
 
-`DEV-002`。DEV-001 の proxy chain が独立レビューで合格したため、capture/replay の技術検証を開始できる。
+`DEV-022`。DEV-020 の route 管理 core と DEV-021 の Docker discovery が独立レビューで合格したため、Web console から両機能を統合するユーザー可視フローを開始できる。
 

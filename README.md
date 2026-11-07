@@ -25,4 +25,4 @@ ProxyConsole 是一个面向 WSL/Docker 本地环境的可观测反向代理管�
 
 ## 当前下一步
 
-`DEV-021`：实现 Docker container/port discovery，并将发现的 target 接入 route 选择，同时保留手动 host/port。任务通过 Git mailbox 自动派发，不需要用户转发提示词。
+`DEV-022`：实现 localhost Web 管理界面，在浏览器中完成 route 管理、Docker target 选择和手动 host/port fallback。任务通过 Git mailbox 自动派发，不需要用户转发提示词。
