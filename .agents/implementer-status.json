@@ -1,13 +1,13 @@
 {
   "protocol_version": 1,
-  "handled_dispatch_id": 8,
-  "task_id": "DEV-030",
-  "state": "ready_for_review",
-  "owner": "orchestrator",
-  "updated_at": "2026-11-07T06:28:00Z",
-  "artifact_commit": "dd300dc",
-  "verification_command": "make clean && make config-test && make test && make down",
-  "verification_passed": true,
-  "summary": "DEV-030 Request draft / replay / export core（SQLite永続draft・順序/重複保持query/header/cookie/form編集・percent-encoding往復・JSON構造化編集とraw fallback・hop-by-hop除外とContent-Length再計算・non-replayable拒否・cURL/fetch出力・replay lineage追跡・統合テスト）を実装し、全統合テスト（DEV-001〜DEV-030）の成功を確認しました。",
+  "handled_dispatch_id": 9,
+  "task_id": "DEV-031",
+  "state": "working",
+  "owner": "implementer",
+  "updated_at": "2026-11-07T06:50:00Z",
+  "artifact_commit": null,
+  "verification_command": null,
+  "verification_passed": null,
+  "summary": "dispatch 9 (DEV-031: Web request viewer / editor / replay console) を受領し、実装とブラウザE2E検証を開始しました。",
   "blocker": null
 }
