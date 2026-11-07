@@ -1,19 +1,19 @@
 {
   "protocol_version": 1,
-  "dispatch_id": 10,
-  "issued_at": "2026-11-07T17:20:18+09:00",
+  "dispatch_id": 11,
+  "issued_at": "2026-11-07T18:38:00+09:00",
   "issued_by": "orchestrator",
   "recipient": "implementer",
-  "command": "execute_task",
+  "command": "revise_task",
   "task_id": "DEV-040",
   "task_file": "docs/tasks/DEV-040.md",
-  "base_commit": "e52da6a",
+  "base_commit": "26435d7",
   "previous_task": {
-    "task_id": "DEV-031",
-    "decision": "approved",
-    "review_file": "docs/reviews/DEV-031-review-001.md"
+    "task_id": "DEV-040",
+    "decision": "changes_requested",
+    "review_file": "docs/reviews/DEV-040-review-001.md"
   },
-  "required_action": "Pull origin/main, acknowledge dispatch 10, execute DEV-040, push evidence, then wait for review.",
+  "required_action": "Pull origin/main, acknowledge dispatch 11, read docs/reviews/DEV-040-review-001.md, fix all three blocking findings with regression tests, push evidence, then wait for review.",
   "state": "assigned"
 }
 
