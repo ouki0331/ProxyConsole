@@ -3,7 +3,7 @@
 更新日: 2026-11-06  
 計画状態: Active  
 現在フェーズ: P4 — 編集、リプレイ、出力
-実装状態: G3 passed / DEV-030 in progress
+実装状態: G3 passed / DEV-030 approved / DEV-031 in progress
 
 ## 1. バージョン目標
 
@@ -199,5 +199,5 @@ G4 不合格時:
 
 ## 7. 次に開始できるタスク
 
-`DEV-030`。DEV-020〜DEV-022 が独立レビューで合格して G3 を通過したため、保存済み request の draft、編集、replay、cURL/fetch export core を開始できる。
+`DEV-031`。DEV-030 の draft/edit/replay/export core が独立レビューで合格したため、既存 Web console へ request viewer/editor/replay/export のユーザー可視フローを統合できる。
 

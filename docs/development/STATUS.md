@@ -3,14 +3,14 @@
 Updated: 2026-11-07  
 Phase: P4
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 pending
-Active task: DEV-030
-Task status: Ready for review
-Owner: orchestrator
-Last verified commit: `dd300dc` (DEV-030 Request draft / replay / export core implementation and integration test)
+Active task: DEV-031
+Task status: In progress
+Owner: implementer
+Last verified commit: `8098a9f` (DEV-030 approved by independent review 001; implementation `dd300dc`)
 Last substantive remote progress: `dd300dc` (DEV-030 Request draft / replay / export core implementation and integration test)
-Task definition baseline: `a00749f`
-Dispatched at: 2026-11-07 14:49 JST
-Mailbox dispatch: `8` (`.agents/dispatch.json`)
+Task definition baseline: `8098a9f`
+Dispatched at: 2026-11-07 15:40 JST
+Mailbox dispatch: `9` (`.agents/dispatch.json`)
 
 ## Current summary
 
@@ -23,11 +23,12 @@ Mailbox dispatch: `8` (`.agents/dispatch.json`)
 - DEV-020 は独立機能 review に合格した。
 - DEV-021 は独立機能 review に合格した。
 - DEV-022 は独立機能 review に合格し、G3 を通過した。
-- P4 の DEV-030 request draft / replay / export core を実装・自動検証し、`Ready for review` に更新した。
+- DEV-030 は独立機能 review に合格した。
+- DEV-031 Web request viewer / editor / replay console を実装 Agent へ dispatch した。G4 は browser-level review 完了まで pending とする。
 
 ## Next transition
 
-orchestrator が DEV-030 の独立機能 review を実施し、合格後に次タスク（DEV-031）を dispatch する。
+implementer が dispatch 9 を acknowledge し、DEV-031 を実装・検証して `Ready for review` にする。
 
 ## Blocking items
 
