@@ -757,11 +757,15 @@ class RetentionEngine:
                                 replayable, is_websocket, body_size, captured_body_size,
                                 body_sha256, blob_ref, content_type, content_encoding,
                                 content_kind, response_status, target_service, duration_ms,
-                                proxy_error, has_parse_errors, record_file, indexed_at
+                                proxy_error, has_parse_errors, rule_modified, rule_failed,
+                                matched_rule_ids_json, applied_rule_ids_json,
+                                skipped_rule_ids_json, failed_rule_ids_json,
+                                rule_evaluation_json, record_file, indexed_at
                             ) VALUES (
                                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?, ?, ?, ?
                             )
                             ON CONFLICT(capture_id) DO UPDATE SET
                                 schema_version = excluded.schema_version,
@@ -791,6 +795,13 @@ class RetentionEngine:
                                 duration_ms = excluded.duration_ms,
                                 proxy_error = excluded.proxy_error,
                                 has_parse_errors = excluded.has_parse_errors,
+                                rule_modified = excluded.rule_modified,
+                                rule_failed = excluded.rule_failed,
+                                matched_rule_ids_json = excluded.matched_rule_ids_json,
+                                applied_rule_ids_json = excluded.applied_rule_ids_json,
+                                skipped_rule_ids_json = excluded.skipped_rule_ids_json,
+                                failed_rule_ids_json = excluded.failed_rule_ids_json,
+                                rule_evaluation_json = excluded.rule_evaluation_json,
                                 record_file = excluded.record_file,
                                 indexed_at = excluded.indexed_at
                             """,

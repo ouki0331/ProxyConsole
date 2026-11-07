@@ -32,6 +32,10 @@ from route_manager import (
     RouteNotFoundError,
     RouteValidationError,
 )
+from rule_engine import (
+    RuleNotFoundError,
+    RuleValidationError,
+)
 
 HOP_BY_HOP_AND_REBUILT_HEADERS = {
     "host",
@@ -66,6 +70,8 @@ def _load_blob(storage_dir: Path, record: dict[str, Any]) -> bytes:
 
 def cmd_search(args: argparse.Namespace) -> int:
     store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    rule_mod = _parse_cli_bool(getattr(args, "rule_modified", None))
+    rule_fail = _parse_cli_bool(getattr(args, "rule_failed", None))
     res = store.query_captures(
         limit=args.limit,
         offset=args.offset,
@@ -81,6 +87,13 @@ def cmd_search(args: argparse.Namespace) -> int:
         response_status=args.response_status,
         source_capture_id=getattr(args, "source_capture_id", None),
         draft_id=getattr(args, "draft_id", None),
+        rule_id=getattr(args, "rule_id", None),
+        applied_rule_id=getattr(args, "applied_rule_id", None),
+        failed_rule_id=getattr(args, "failed_rule_id", None),
+        skipped_rule_id=getattr(args, "skipped_rule_id", None),
+        rule_modified=rule_mod,
+        rule_failed=rule_fail,
+        rule_outcome=getattr(args, "rule_outcome", None),
     )
     if getattr(args, "items_only", False):
         print(json.dumps(res["items"], ensure_ascii=False, indent=2))
@@ -610,6 +623,13 @@ def _add_search_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--response-status", type=int, default=None)
     p.add_argument("--source-capture-id", default=None)
     p.add_argument("--draft-id", default=None)
+    p.add_argument("--rule-id", default=None)
+    p.add_argument("--applied-rule-id", default=None)
+    p.add_argument("--failed-rule-id", default=None)
+    p.add_argument("--skipped-rule-id", default=None)
+    p.add_argument("--rule-modified", default=None)
+    p.add_argument("--rule-failed", default=None)
+    p.add_argument("--rule-outcome", default=None)
 
 
 def _parse_kv_mutation(item: str, op: str) -> dict[str, Any]:
@@ -920,6 +940,395 @@ def cmd_draft_replay(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+
+
+def _parse_rule_pair_matcher(item: str) -> dict[str, Any]:
+    """Parse KEY or KEY=VALUE or KEY~REGEX or KEY!= (absent) for pair matchers."""
+    if item.startswith("!"):
+        return {"name": item[1:], "present": False}
+    if "~" in item and ("=" not in item or item.index("~") < item.index("=")):
+        k, pat = item.split("~", 1)
+        return {"name": k, "value_regex": pat}
+    if "=" in item:
+        k, v = item.split("=", 1)
+        return {"name": k, "value": v}
+    return {"name": item, "present": True}
+
+
+def _parse_rule_pair_action(target: str, op: str, item: str) -> dict[str, Any]:
+    act = _parse_kv_mutation(item, op)
+    act["target"] = target
+    return act
+
+
+def _build_rule_match_from_args(args: argparse.Namespace) -> dict[str, Any] | None:
+    has_any = False
+    match_obj: dict[str, Any] = {}
+    if getattr(args, "match_json", None):
+        match_obj = json.loads(args.match_json)
+        has_any = True
+    if getattr(args, "route_id", None):
+        match_obj["route_id"] = list(args.route_id)
+        has_any = True
+    if getattr(args, "domain", None):
+        match_obj["domain"] = list(args.domain)
+        has_any = True
+    if getattr(args, "method", None):
+        match_obj["method"] = list(args.method)
+        has_any = True
+    if getattr(args, "path_exact", None) is not None:
+        match_obj["path_exact"] = args.path_exact
+        has_any = True
+    if getattr(args, "path_prefix", None) is not None:
+        match_obj["path_prefix"] = args.path_prefix
+        has_any = True
+    if getattr(args, "path_regex", None) is not None:
+        match_obj["path_regex"] = args.path_regex
+        has_any = True
+    if getattr(args, "content_type", None):
+        match_obj["content_type"] = list(args.content_type)
+        has_any = True
+    if getattr(args, "query_match", None):
+        q_list = list(match_obj.get("query_pairs") or [])
+        for it in args.query_match:
+            q_list.append(_parse_rule_pair_matcher(it))
+        match_obj["query_pairs"] = q_list
+        has_any = True
+    if getattr(args, "header_match", None):
+        h_list = list(match_obj.get("header_pairs") or [])
+        for it in args.header_match:
+            h_list.append(_parse_rule_pair_matcher(it))
+        match_obj["header_pairs"] = h_list
+        has_any = True
+    return match_obj if has_any else None
+
+
+def _build_rule_actions_from_args(args: argparse.Namespace) -> list[dict[str, Any]] | None:
+    actions: list[dict[str, Any]] = []
+    has_any = False
+    if getattr(args, "actions_json", None):
+        parsed = json.loads(args.actions_json)
+        if not isinstance(parsed, list):
+            raise RuleValidationError(
+                "--actions-json must be a JSON array", code="invalid_actions"
+            )
+        actions.extend(parsed)
+        has_any = True
+
+    for item in getattr(args, "query_add", None) or []:
+        actions.append(_parse_rule_pair_action("query", "add", item))
+        has_any = True
+    for item in getattr(args, "query_set", None) or []:
+        actions.append(_parse_rule_pair_action("query", "set", item))
+        has_any = True
+    for item in getattr(args, "query_remove", None) or []:
+        actions.append(_parse_rule_pair_action("query", "remove", item))
+        has_any = True
+
+    for item in getattr(args, "header_add", None) or []:
+        actions.append(_parse_rule_pair_action("header", "add", item))
+        has_any = True
+    for item in getattr(args, "header_set", None) or []:
+        actions.append(_parse_rule_pair_action("header", "set", item))
+        has_any = True
+    for item in getattr(args, "header_remove", None) or []:
+        actions.append(_parse_rule_pair_action("header", "remove", item))
+        has_any = True
+
+    for item in getattr(args, "cookie_add", None) or []:
+        actions.append(_parse_rule_pair_action("cookie", "add", item))
+        has_any = True
+    for item in getattr(args, "cookie_set", None) or []:
+        actions.append(_parse_rule_pair_action("cookie", "set", item))
+        has_any = True
+    for item in getattr(args, "cookie_remove", None) or []:
+        actions.append(_parse_rule_pair_action("cookie", "remove", item))
+        has_any = True
+
+    for item in getattr(args, "json_set", None) or []:
+        if "=" not in item:
+            raise RuleValidationError(
+                f"Expected PATH=JSON_VALUE for --json-set, got: {item}",
+                code="invalid_action",
+            )
+        p_str, v_str = item.split("=", 1)
+        try:
+            parsed_v = json.loads(v_str)
+        except Exception:
+            parsed_v = v_str
+        actions.append({"target": "json", "op": "set", "path": p_str, "value": parsed_v})
+        has_any = True
+    for p_str in getattr(args, "json_remove", None) or []:
+        actions.append({"target": "json", "op": "remove", "path": p_str})
+        has_any = True
+
+    for item in getattr(args, "form_add", None) or []:
+        actions.append(_parse_rule_pair_action("form", "add", item))
+        has_any = True
+    for item in getattr(args, "form_set", None) or []:
+        actions.append(_parse_rule_pair_action("form", "set", item))
+        has_any = True
+    for item in getattr(args, "form_remove", None) or []:
+        actions.append(_parse_rule_pair_action("form", "remove", item))
+        has_any = True
+
+    return actions if has_any else None
+
+
+def cmd_rule_list(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    en = _parse_cli_bool(args.enabled)
+    res = store.rules.list_rules(enabled=en)
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_rule_get(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.rules.get_rule(args.rule_id)
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except RuleNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "rule_not_found", "rule_id": exc.rule_id, "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_rule_create(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    en = _parse_cli_bool(args.enabled)
+    try:
+        match_obj = _build_rule_match_from_args(args) or {}
+        actions_list = _build_rule_actions_from_args(args) or []
+        res = store.rules.create_rule(
+            name=args.name,
+            match=match_obj,
+            actions=actions_list,
+            rule_id=args.rule_id,
+            description=args.description or "",
+            enabled=True if en is None else en,
+            priority=args.priority,
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except (RuleValidationError, ValueError) as exc:
+        payload = (
+            exc.to_dict()
+            if isinstance(exc, RuleValidationError)
+            else {"error": "invalid_rule", "message": str(exc)}
+        )
+        print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+        return 2
+
+
+def cmd_rule_update(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    en = _parse_cli_bool(args.enabled)
+    try:
+        match_obj = _build_rule_match_from_args(args)
+        actions_list = _build_rule_actions_from_args(args)
+        res = store.rules.update_rule(
+            args.rule_id,
+            name=args.name,
+            description=args.description,
+            enabled=en,
+            priority=args.priority,
+            match=match_obj,
+            actions=actions_list,
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except RuleNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "rule_not_found", "rule_id": exc.rule_id, "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except (RuleValidationError, ValueError) as exc:
+        payload = (
+            exc.to_dict()
+            if isinstance(exc, RuleValidationError)
+            else {"error": "invalid_rule", "message": str(exc)}
+        )
+        print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+        return 2
+
+
+def cmd_rule_copy(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    en = _parse_cli_bool(args.enabled)
+    try:
+        match_obj = _build_rule_match_from_args(args)
+        actions_list = _build_rule_actions_from_args(args)
+        res = store.rules.copy_rule(
+            args.source_rule_id,
+            rule_id=args.rule_id,
+            name=args.name,
+            description=args.description,
+            enabled=en,
+            priority=args.priority,
+            match=match_obj,
+            actions=actions_list,
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except RuleNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "rule_not_found", "rule_id": exc.rule_id, "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except (RuleValidationError, ValueError) as exc:
+        payload = (
+            exc.to_dict()
+            if isinstance(exc, RuleValidationError)
+            else {"error": "invalid_rule", "message": str(exc)}
+        )
+        print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+        return 2
+
+
+def cmd_rule_enable_disable(args: argparse.Namespace, enabled: bool) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.rules.set_rule_enabled(args.rule_id, enabled)
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except RuleNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "rule_not_found", "rule_id": exc.rule_id, "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_rule_delete(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        res = store.rules.delete_rule(args.rule_id)
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except RuleNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "rule_not_found", "rule_id": exc.rule_id, "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+def cmd_rule_preview(args: argparse.Namespace) -> int:
+    store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+    try:
+        req_spec: dict[str, Any] | None = None
+        if args.request_json:
+            req_spec = json.loads(args.request_json)
+        elif not args.capture_id:
+            req_spec = {}
+            if args.method:
+                req_spec["method"] = args.method
+            if args.authority:
+                req_spec["authority"] = args.authority
+            if args.host:
+                req_spec["host"] = args.host
+            if args.raw_path:
+                req_spec["raw_path"] = args.raw_path
+            if args.raw_query is not None:
+                req_spec["raw_query"] = args.raw_query
+            if args.content_type:
+                req_spec["content_type"] = args.content_type
+            if args.headers_json:
+                req_spec["headers"] = json.loads(args.headers_json)
+            if args.body_text is not None:
+                req_spec["body_text"] = args.body_text
+            if args.body_base64 is not None:
+                req_spec["body_base64"] = args.body_base64
+
+        cand_rule = (
+            json.loads(args.candidate_rule_json)
+            if args.candidate_rule_json
+            else None
+        )
+        res = store.rules.preview_rules(
+            capture_id=args.capture_id,
+            request_spec=req_spec,
+            rule_ids=args.rule_id if args.rule_id else None,
+            include_disabled=bool(args.include_disabled),
+            candidate_rule=cand_rule,
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+    except FileNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "capture_not_found", "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except RuleNotFoundError as exc:
+        print(
+            json.dumps(
+                {"error": "rule_not_found", "rule_id": exc.rule_id, "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    except (RuleValidationError, ValueError) as exc:
+        payload = (
+            exc.to_dict()
+            if isinstance(exc, RuleValidationError)
+            else {"error": "invalid_preview", "message": str(exc)}
+        )
+        print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+        return 2
+
+
+def _add_rule_match_and_action_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--match-json", default=None)
+    p.add_argument("--actions-json", default=None)
+    p.add_argument("--route-id", action="append", default=[])
+    p.add_argument("--domain", action="append", default=[])
+    p.add_argument("--method", action="append", default=[])
+    p.add_argument("--path-exact", default=None)
+    p.add_argument("--path-prefix", default=None)
+    p.add_argument("--path-regex", default=None)
+    p.add_argument("--content-type", action="append", default=[])
+    p.add_argument("--query-match", action="append", default=[])
+    p.add_argument("--header-match", action="append", default=[])
+    p.add_argument("--query-add", action="append", default=[])
+    p.add_argument("--query-set", action="append", default=[])
+    p.add_argument("--query-remove", action="append", default=[])
+    p.add_argument("--header-add", action="append", default=[])
+    p.add_argument("--header-set", action="append", default=[])
+    p.add_argument("--header-remove", action="append", default=[])
+    p.add_argument("--cookie-add", action="append", default=[])
+    p.add_argument("--cookie-set", action="append", default=[])
+    p.add_argument("--cookie-remove", action="append", default=[])
+    p.add_argument("--json-set", action="append", default=[])
+    p.add_argument("--json-remove", action="append", default=[])
+    p.add_argument("--form-add", action="append", default=[])
+    p.add_argument("--form-set", action="append", default=[])
+    p.add_argument("--form-remove", action="append", default=[])
 
 
 def main() -> int:
@@ -1261,6 +1670,81 @@ def main() -> int:
     )
     p_dr_replay.add_argument("--override-host", default="")
 
+    p_ru_list = sub.add_parser(
+        "rule-list", help="List persisted automatic request modification rules"
+    )
+    p_ru_list.add_argument(
+        "--enabled",
+        default=None,
+        help="Optional filter by enabled status (true/false)",
+    )
+
+    p_ru_get = sub.add_parser(
+        "rule-get", help="Get a single modification rule by ID"
+    )
+    p_ru_get.add_argument("rule_id", help="Rule ID")
+
+    p_ru_create = sub.add_parser(
+        "rule-create", help="Create a new automatic request modification rule"
+    )
+    p_ru_create.add_argument("--name", required=True)
+    p_ru_create.add_argument("--rule-id", default=None)
+    p_ru_create.add_argument("--description", default="")
+    p_ru_create.add_argument("--enabled", default="true")
+    p_ru_create.add_argument("--priority", type=int, default=100)
+    _add_rule_match_and_action_args(p_ru_create)
+
+    p_ru_update = sub.add_parser(
+        "rule-update", help="Update an existing modification rule"
+    )
+    p_ru_update.add_argument("rule_id", help="Rule ID")
+    p_ru_update.add_argument("--name", default=None)
+    p_ru_update.add_argument("--description", default=None)
+    p_ru_update.add_argument("--enabled", default=None)
+    p_ru_update.add_argument("--priority", type=int, default=None)
+    _add_rule_match_and_action_args(p_ru_update)
+
+    p_ru_copy = sub.add_parser(
+        "rule-copy", help="Copy an existing modification rule"
+    )
+    p_ru_copy.add_argument("source_rule_id", help="Source rule ID to copy")
+    p_ru_copy.add_argument("--rule-id", default=None)
+    p_ru_copy.add_argument("--name", default=None)
+    p_ru_copy.add_argument("--description", default=None)
+    p_ru_copy.add_argument("--enabled", default=None)
+    p_ru_copy.add_argument("--priority", type=int, default=None)
+    _add_rule_match_and_action_args(p_ru_copy)
+
+    p_ru_enable = sub.add_parser("rule-enable", help="Enable a modification rule")
+    p_ru_enable.add_argument("rule_id", help="Rule ID")
+
+    p_ru_disable = sub.add_parser(
+        "rule-disable", help="Disable a modification rule"
+    )
+    p_ru_disable.add_argument("rule_id", help="Rule ID")
+
+    p_ru_delete = sub.add_parser("rule-delete", help="Delete a modification rule")
+    p_ru_delete.add_argument("rule_id", help="Rule ID")
+
+    p_ru_preview = sub.add_parser(
+        "rule-preview",
+        help="Dry-run preview modification rules against a capture or synthetic request",
+    )
+    p_ru_preview.add_argument("--capture-id", default=None)
+    p_ru_preview.add_argument("--request-json", default=None)
+    p_ru_preview.add_argument("--method", default="GET")
+    p_ru_preview.add_argument("--authority", default=None)
+    p_ru_preview.add_argument("--host", default=None)
+    p_ru_preview.add_argument("--raw-path", default="/")
+    p_ru_preview.add_argument("--raw-query", default="")
+    p_ru_preview.add_argument("--content-type", default=None)
+    p_ru_preview.add_argument("--headers-json", default=None)
+    p_ru_preview.add_argument("--body-text", default=None)
+    p_ru_preview.add_argument("--body-base64", default=None)
+    p_ru_preview.add_argument("--rule-id", action="append", default=[])
+    p_ru_preview.add_argument("--include-disabled", action="store_true")
+    p_ru_preview.add_argument("--candidate-rule-json", default=None)
+
     args = parser.parse_args()
     if args.subcommand in ("list", "search"):
         return cmd_search(args)
@@ -1326,6 +1810,24 @@ def main() -> int:
         return cmd_draft_export(args)
     if args.subcommand == "draft-replay":
         return cmd_draft_replay(args)
+    if args.subcommand == "rule-list":
+        return cmd_rule_list(args)
+    if args.subcommand == "rule-get":
+        return cmd_rule_get(args)
+    if args.subcommand == "rule-create":
+        return cmd_rule_create(args)
+    if args.subcommand == "rule-update":
+        return cmd_rule_update(args)
+    if args.subcommand == "rule-copy":
+        return cmd_rule_copy(args)
+    if args.subcommand == "rule-enable":
+        return cmd_rule_enable_disable(args, True)
+    if args.subcommand == "rule-disable":
+        return cmd_rule_enable_disable(args, False)
+    if args.subcommand == "rule-delete":
+        return cmd_rule_delete(args)
+    if args.subcommand == "rule-preview":
+        return cmd_rule_preview(args)
     return 1
 
 

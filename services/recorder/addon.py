@@ -109,6 +109,61 @@ class CaptureRecorderAddon:
         except Exception as exc:
             print(f"[recorder] requestheaders warning: {exc}", flush=True)
 
+    def request(self, flow: http.HTTPFlow) -> None:
+        try:
+            req = flow.request
+            ordered_headers = [
+                [k.decode("latin-1"), v.decode("latin-1")]
+                for k, v in req.headers.fields
+            ]
+            authority = req.headers.get("Host") or req.host_header or ""
+            scheme = req.headers.get("X-Forwarded-Proto") or req.scheme or "http"
+            raw_target = req.path or "/"
+            if "?" in raw_target:
+                raw_path, raw_query = raw_target.split("?", 1)
+            else:
+                raw_path, raw_query = raw_target, ""
+
+            upgrade_hdr = (req.headers.get("Upgrade") or "").lower()
+            is_websocket = upgrade_hdr == "websocket"
+            is_streamed = flow.id in self._stream_states
+            raw_body = (
+                b""
+                if (is_websocket or is_streamed)
+                else (req.raw_content if req.raw_content is not None else b"")
+            )
+            route_id = self._resolve_route_id(authority)
+
+            rule_res = self.index_store.rules.evaluate_and_apply(
+                route_id=route_id,
+                method=req.method,
+                scheme=scheme,
+                authority=authority,
+                raw_path=raw_path,
+                raw_query=raw_query,
+                headers=ordered_headers,
+                raw_body=raw_body,
+                is_websocket=is_websocket,
+                is_streamed=is_streamed,
+            )
+            flow.metadata["pc_rule_evaluation"] = rule_res["evaluation"]
+
+            if rule_res["modified"] and not is_websocket and not is_streamed:
+                req.path = rule_res["raw_target"]
+                req.raw_content = rule_res["body_bytes"]
+                req.headers.fields = tuple(
+                    (
+                        str(k).encode("latin-1", errors="replace"),
+                        str(v).encode("latin-1", errors="replace"),
+                    )
+                    for k, v in rule_res["headers"]
+                )
+        except Exception as exc:
+            print(
+                f"[recorder] rule evaluation error (fail-open, forwarding original request): {exc}",
+                flush=True,
+            )
+
     def response(self, flow: http.HTTPFlow) -> None:
         self._finalize_flow(flow, proxy_error=None)
 
@@ -281,6 +336,19 @@ class CaptureRecorderAddon:
                     "proxy_error": proxy_error,
                 },
                 "derived_views": derived_views,
+                "rule_evaluation": flow.metadata.get("pc_rule_evaluation")
+                or {
+                    "evaluated": False,
+                    "modified": False,
+                    "has_failures": False,
+                    "matched_rule_ids": [],
+                    "applied_rule_ids": [],
+                    "skipped_rule_ids": [],
+                    "failed_rule_ids": [],
+                    "change_count": 0,
+                    "change_summary": [],
+                    "rules": [],
+                },
             }
 
             self._write_record(capture_id, record)

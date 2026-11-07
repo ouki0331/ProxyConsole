@@ -31,6 +31,10 @@ from route_manager import (
     RouteNotFoundError,
     RouteValidationError,
 )
+from rule_engine import (
+    RuleNotFoundError,
+    RuleValidationError,
+)
 
 API_HOST = os.environ.get("CONTROL_API_LISTEN_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("CONTROL_API_PORT", "18480"))
@@ -263,6 +267,32 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                     )
                 return
 
+            if path == "/api/v1/rules":
+                en_str = _first_param(qs, "enabled")
+                enabled_filter = (
+                    _parse_bool(en_str) if en_str is not None else None
+                )
+                self._send_json(
+                    200,
+                    self.store.rules.list_rules(enabled=enabled_filter),
+                )
+                return
+
+            if path.startswith("/api/v1/rules/"):
+                rule_id = unquote(path[len("/api/v1/rules/") :])
+                try:
+                    self._send_json(200, self.store.rules.get_rule(rule_id))
+                except RuleNotFoundError as exc:
+                    self._send_json(
+                        404,
+                        {
+                            "error": "rule_not_found",
+                            "rule_id": rule_id,
+                            "message": str(exc),
+                        },
+                    )
+                return
+
             if path == "/api/v1/captures":
                 limit_str = _first_param(qs, "limit")
                 offset_str = _first_param(qs, "offset")
@@ -290,6 +320,23 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 )
                 source_capture_id = _first_param(qs, "source_capture_id")
                 draft_id_filter = _first_param(qs, "draft_id")
+                rule_id_filter = _first_param(qs, "rule_id")
+                applied_rule_id = _first_param(qs, "applied_rule_id")
+                failed_rule_id = _first_param(qs, "failed_rule_id")
+                skipped_rule_id = _first_param(qs, "skipped_rule_id")
+                rule_mod_str = _first_param(qs, "rule_modified")
+                rule_fail_str = _first_param(qs, "rule_failed")
+                rule_outcome = _first_param(qs, "rule_outcome")
+                rule_modified = (
+                    _parse_bool(rule_mod_str)
+                    if rule_mod_str is not None
+                    else None
+                )
+                rule_failed = (
+                    _parse_bool(rule_fail_str)
+                    if rule_fail_str is not None
+                    else None
+                )
 
                 result = self.store.query_captures(
                     limit=limit,
@@ -306,6 +353,13 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                     response_status=resp_status,
                     source_capture_id=source_capture_id,
                     draft_id=draft_id_filter,
+                    rule_id=rule_id_filter,
+                    applied_rule_id=applied_rule_id,
+                    failed_rule_id=failed_rule_id,
+                    skipped_rule_id=skipped_rule_id,
+                    rule_modified=rule_modified,
+                    rule_failed=rule_failed,
+                    rule_outcome=rule_outcome,
                 )
                 self._send_json(200, result)
                 return
@@ -533,6 +587,25 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 route_id = unquote(path[len("/api/v1/routes/") :])
                 self._handle_route_update(route_id)
                 return
+            if path.startswith("/api/v1/rules/") and path != "/api/v1/rules/preview":
+                rule_id = unquote(path[len("/api/v1/rules/") :])
+                body = self._read_json_body()
+                enabled_val = (
+                    _parse_bool(body["enabled"])
+                    if "enabled" in body and body["enabled"] is not None
+                    else None
+                )
+                res = self.store.rules.update_rule(
+                    rule_id,
+                    name=body.get("name"),
+                    description=body.get("description"),
+                    enabled=enabled_val,
+                    priority=body.get("priority"),
+                    match=body.get("match"),
+                    actions=body.get("actions"),
+                )
+                self._send_json(200, res)
+                return
             if path.startswith("/api/v1/drafts/"):
                 draft_id = unquote(path[len("/api/v1/drafts/") :])
                 body = self._read_json_body()
@@ -540,6 +613,18 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 self._send_json(200, res)
                 return
             self._send_json(404, {"error": "not_found", "path": path})
+        except RuleNotFoundError as exc:
+            self._send_json(
+                404,
+                {
+                    "error": "rule_not_found",
+                    "rule_id": exc.rule_id,
+                    "message": str(exc),
+                },
+            )
+        except RuleValidationError as exc:
+            status_code = 409 if exc.code == "duplicate_rule_id" else 400
+            self._send_json(status_code, exc.to_dict())
         except DraftExpiredError as exc:
             self._send_json(
                 404,
@@ -626,7 +711,21 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 res = self.store.drafts.delete_draft(draft_id)
                 self._send_json(200, res)
                 return
+            if path.startswith("/api/v1/rules/") and path != "/api/v1/rules/preview":
+                rule_id = unquote(path[len("/api/v1/rules/") :])
+                res = self.store.rules.delete_rule(rule_id)
+                self._send_json(200, res)
+                return
             self._send_json(404, {"error": "not_found", "path": path})
+        except RuleNotFoundError as exc:
+            self._send_json(
+                404,
+                {
+                    "error": "rule_not_found",
+                    "rule_id": exc.rule_id,
+                    "message": str(exc),
+                },
+            )
         except DraftNotFoundError as exc:
             self._send_json(
                 404,
@@ -807,6 +906,104 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 self._send_json(200, res)
                 return
 
+            if path == "/api/v1/rules":
+                enabled_val = (
+                    _parse_bool(body["enabled"])
+                    if "enabled" in body and body["enabled"] is not None
+                    else True
+                )
+                res = self.store.rules.create_rule(
+                    name=body.get("name", ""),
+                    match=body.get("match"),
+                    actions=body.get("actions"),
+                    rule_id=body.get("rule_id"),
+                    description=body.get("description", ""),
+                    enabled=enabled_val,
+                    priority=body.get("priority", 100),
+                    copied_from_rule_id=body.get("copied_from_rule_id"),
+                )
+                self._send_json(201, res)
+                return
+
+            if path == "/api/v1/rules/preview":
+                include_disabled = (
+                    _parse_bool(body["include_disabled"])
+                    if "include_disabled" in body
+                    and body["include_disabled"] is not None
+                    else False
+                )
+                res = self.store.rules.preview_rules(
+                    capture_id=body.get("capture_id"),
+                    request_spec=body.get("request")
+                    if isinstance(body.get("request"), dict)
+                    else body,
+                    rule_ids=body.get("rule_ids"),
+                    include_disabled=include_disabled,
+                    candidate_rule=body.get("candidate_rule"),
+                )
+                self._send_json(200, res)
+                return
+
+            if (
+                path.startswith("/api/v1/captures/")
+                and path.endswith("/rules-preview")
+            ):
+                cap_id = unquote(
+                    path[len("/api/v1/captures/") : -len("/rules-preview")]
+                )
+                include_disabled = (
+                    _parse_bool(body["include_disabled"])
+                    if "include_disabled" in body
+                    and body["include_disabled"] is not None
+                    else False
+                )
+                res = self.store.rules.preview_rules(
+                    capture_id=cap_id,
+                    rule_ids=body.get("rule_ids"),
+                    include_disabled=include_disabled,
+                    candidate_rule=body.get("candidate_rule"),
+                )
+                self._send_json(200, res)
+                return
+
+            if path.startswith("/api/v1/rules/") and path.endswith("/copy"):
+                source_id = unquote(
+                    path[len("/api/v1/rules/") : -len("/copy")]
+                )
+                enabled_val = (
+                    _parse_bool(body["enabled"])
+                    if "enabled" in body and body["enabled"] is not None
+                    else None
+                )
+                res = self.store.rules.copy_rule(
+                    source_id,
+                    rule_id=body.get("rule_id"),
+                    name=body.get("name"),
+                    description=body.get("description"),
+                    enabled=enabled_val,
+                    priority=body.get("priority"),
+                    match=body.get("match"),
+                    actions=body.get("actions"),
+                )
+                self._send_json(201, res)
+                return
+
+            if path.startswith("/api/v1/rules/") and path.endswith("/enable"):
+                rule_id = unquote(
+                    path[len("/api/v1/rules/") : -len("/enable")]
+                )
+                res = self.store.rules.set_rule_enabled(rule_id, True)
+                self._send_json(200, res)
+                return
+
+            if path.startswith("/api/v1/rules/") and path.endswith("/disable"):
+                rule_id = unquote(
+                    path[len("/api/v1/rules/") : -len("/disable")]
+                )
+                res = self.store.rules.set_rule_enabled(rule_id, False)
+                self._send_json(200, res)
+                return
+
             if path == "/api/v1/retention/run":
                 dry_run_q = _first_param(qs, "dry_run")
                 if dry_run_q is not None:
@@ -941,6 +1138,18 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 404,
                 {"error": "capture_not_found", "message": str(exc)},
             )
+        except RuleNotFoundError as exc:
+            self._send_json(
+                404,
+                {
+                    "error": "rule_not_found",
+                    "rule_id": exc.rule_id,
+                    "message": str(exc),
+                },
+            )
+        except RuleValidationError as exc:
+            status_code = 409 if exc.code == "duplicate_rule_id" else 400
+            self._send_json(status_code, exc.to_dict())
         except DraftExpiredError as exc:
             self._send_json(
                 404,

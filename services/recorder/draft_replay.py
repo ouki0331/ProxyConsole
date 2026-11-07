@@ -10,6 +10,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import socket
 import ssl
@@ -452,7 +453,8 @@ def apply_json_path_mutations(
                 "JSON mutation requires non-empty 'path'",
                 code="invalid_json_mutation",
             )
-        tokens = [t for t in path_str.split(".") if t != ""]
+        norm_path = re.sub(r"\[(\d+)\]", r".\1", path_str)
+        tokens = [t for t in norm_path.split(".") if t != ""]
         cur = data
         for seg in tokens[:-1]:
             if isinstance(cur, list):
@@ -508,11 +510,27 @@ def apply_json_path_mutations(
                 )
         elif op in ("delete", "remove"):
             if isinstance(cur, list):
-                idx = int(last)
+                try:
+                    idx = int(last)
+                except ValueError as exc:
+                    raise DraftValidationError(
+                        f"Expected list index at {last!r} in path {path_str!r}",
+                        code="invalid_json_path",
+                    ) from exc
                 if 0 <= idx < len(cur):
                     cur.pop(idx)
+                else:
+                    raise DraftValidationError(
+                        f"List index {idx} out of range in path {path_str!r}",
+                        code="invalid_json_path",
+                    )
             elif isinstance(cur, dict):
                 cur.pop(last, None)
+            else:
+                raise DraftValidationError(
+                    f"Cannot delete property {last!r} on non-container in path {path_str!r}",
+                    code="invalid_json_path",
+                )
         else:
             raise DraftValidationError(
                 f"Unsupported JSON mutation op: {op!r}",

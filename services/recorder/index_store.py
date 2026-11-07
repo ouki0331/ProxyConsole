@@ -29,13 +29,33 @@ from retention import (
     RetentionEngine,
 )
 from route_manager import RouteManager
+from rule_engine import RuleEngineManager
 
-INDEX_SCHEMA_VERSION = 5
+INDEX_SCHEMA_VERSION = 6
 MIGRATION_NAME = "001_capture_index.sql"
 RETENTION_MIGRATION_NAME = "002_retention_policy.sql"
 ROUTES_MIGRATION_NAME = "003_routes.sql"
 DISCOVERY_MIGRATION_NAME = "004_discovery.sql"
 DRAFTS_MIGRATION_NAME = "005_request_drafts.sql"
+RULES_MIGRATION_NAME = "006_modification_rules.sql"
+
+DEFAULT_RULES_MIGRATION_SQL = """
+CREATE TABLE IF NOT EXISTS modification_rules (
+    rule_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 100,
+    match_json TEXT NOT NULL DEFAULT '{}',
+    actions_json TEXT NOT NULL DEFAULT '[]',
+    copied_from_rule_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_modification_rules_order
+    ON modification_rules (enabled DESC, priority ASC, created_at ASC, rule_id ASC);
+"""
 
 DEFAULT_DRAFTS_MIGRATION_SQL = """
 CREATE TABLE IF NOT EXISTS request_drafts (
@@ -347,10 +367,17 @@ class CaptureIndexStore:
                 "/app/migrations/005_request_drafts.sql",
             )
         )
+        self.rules_migration_path = Path(
+            os.environ.get(
+                "RULES_MIGRATION_FILE",
+                "/app/migrations/006_modification_rules.sql",
+            )
+        )
         self.retention = RetentionEngine(self)
         self.routes = RouteManager(self)
         self.discovery = DockerDiscoveryService(self)
         self.drafts = DraftReplayManager(self)
+        self.rules = RuleEngineManager(self)
 
     @contextlib.contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -387,12 +414,17 @@ class CaptureIndexStore:
         if self.drafts_migration_path.is_file():
             sql_text_005 = self.drafts_migration_path.read_text(encoding="utf-8")
 
+        sql_text_006 = DEFAULT_RULES_MIGRATION_SQL
+        if self.rules_migration_path.is_file():
+            sql_text_006 = self.rules_migration_path.read_text(encoding="utf-8")
+
         with self._connect() as conn:
             conn.executescript(sql_text_001)
             conn.executescript(sql_text_002)
             conn.executescript(sql_text_003)
             conn.executescript(sql_text_004)
             conn.executescript(sql_text_005)
+            conn.executescript(sql_text_006)
             route_cols = {
                 r["name"]
                 for r in conn.execute("PRAGMA table_info(routes)").fetchall()
@@ -401,6 +433,23 @@ class CaptureIndexStore:
                 conn.execute(
                     "ALTER TABLE routes ADD COLUMN target_metadata_json TEXT"
                 )
+            cap_cols = {
+                r["name"]
+                for r in conn.execute("PRAGMA table_info(captures_index)").fetchall()
+            }
+            for col_name, col_def in (
+                ("rule_modified", "INTEGER NOT NULL DEFAULT 0"),
+                ("rule_failed", "INTEGER NOT NULL DEFAULT 0"),
+                ("matched_rule_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("applied_rule_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("skipped_rule_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("failed_rule_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("rule_evaluation_json", "TEXT"),
+            ):
+                if col_name not in cap_cols:
+                    conn.execute(
+                        f"ALTER TABLE captures_index ADD COLUMN {col_name} {col_def}"
+                    )
             now_iso = datetime.now(timezone.utc).isoformat()
             conn.execute(
                 """
@@ -441,6 +490,14 @@ class CaptureIndexStore:
                 ON CONFLICT(version) DO NOTHING
                 """,
                 (DRAFTS_MIGRATION_NAME, now_iso),
+            )
+            conn.execute(
+                """
+                INSERT INTO schema_migrations (version, name, applied_at)
+                VALUES (6, ?, ?)
+                ON CONFLICT(version) DO NOTHING
+                """,
+                (RULES_MIGRATION_NAME, now_iso),
             )
             conn.execute(
                 """
@@ -551,6 +608,13 @@ class CaptureIndexStore:
         forwarding = record.get("forwarding") or {}
         derived = record.get("derived_views") or {}
         parse_errors = derived.get("parse_errors") or []
+        rule_eval = record.get("rule_evaluation") or {}
+        matched_ids = rule_eval.get("matched_rule_ids") or []
+        applied_ids = rule_eval.get("applied_rule_ids") or []
+        skipped_ids = rule_eval.get("skipped_rule_ids") or []
+        failed_ids = rule_eval.get("failed_rule_ids") or []
+        rule_modified = 1 if (rule_eval.get("modified") or len(applied_ids) > 0) else 0
+        rule_failed = 1 if (rule_eval.get("has_failures") or len(failed_ids) > 0) else 0
 
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -583,6 +647,13 @@ class CaptureIndexStore:
             forwarding.get("duration_ms"),
             forwarding.get("proxy_error"),
             1 if len(parse_errors) > 0 else 0,
+            rule_modified,
+            rule_failed,
+            json.dumps(matched_ids, ensure_ascii=False),
+            json.dumps(applied_ids, ensure_ascii=False),
+            json.dumps(skipped_ids, ensure_ascii=False),
+            json.dumps(failed_ids, ensure_ascii=False),
+            json.dumps(rule_eval, ensure_ascii=False) if rule_eval else None,
             record_file,
             now_iso,
         )
@@ -603,11 +674,15 @@ class CaptureIndexStore:
                     replayable, is_websocket, body_size, captured_body_size,
                     body_sha256, blob_ref, content_type, content_encoding,
                     content_kind, response_status, target_service, duration_ms,
-                    proxy_error, has_parse_errors, record_file, indexed_at
+                    proxy_error, has_parse_errors, rule_modified, rule_failed,
+                    matched_rule_ids_json, applied_rule_ids_json,
+                    skipped_rule_ids_json, failed_rule_ids_json,
+                    rule_evaluation_json, record_file, indexed_at
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?
                 )
                 ON CONFLICT(capture_id) DO UPDATE SET
                     schema_version = excluded.schema_version,
@@ -637,6 +712,13 @@ class CaptureIndexStore:
                     duration_ms = excluded.duration_ms,
                     proxy_error = excluded.proxy_error,
                     has_parse_errors = excluded.has_parse_errors,
+                    rule_modified = excluded.rule_modified,
+                    rule_failed = excluded.rule_failed,
+                    matched_rule_ids_json = excluded.matched_rule_ids_json,
+                    applied_rule_ids_json = excluded.applied_rule_ids_json,
+                    skipped_rule_ids_json = excluded.skipped_rule_ids_json,
+                    failed_rule_ids_json = excluded.failed_rule_ids_json,
+                    rule_evaluation_json = excluded.rule_evaluation_json,
                     record_file = excluded.record_file,
                     indexed_at = excluded.indexed_at
                 """,
@@ -675,11 +757,15 @@ class CaptureIndexStore:
                             replayable, is_websocket, body_size, captured_body_size,
                             body_sha256, blob_ref, content_type, content_encoding,
                             content_kind, response_status, target_service, duration_ms,
-                            proxy_error, has_parse_errors, record_file, indexed_at
+                            proxy_error, has_parse_errors, rule_modified, rule_failed,
+                            matched_rule_ids_json, applied_rule_ids_json,
+                            skipped_rule_ids_json, failed_rule_ids_json,
+                            rule_evaluation_json, record_file, indexed_at
                         ) VALUES (
                             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?, ?, ?, ?
                         )
                         ON CONFLICT(capture_id) DO UPDATE SET
                             schema_version = excluded.schema_version,
@@ -709,6 +795,13 @@ class CaptureIndexStore:
                             duration_ms = excluded.duration_ms,
                             proxy_error = excluded.proxy_error,
                             has_parse_errors = excluded.has_parse_errors,
+                            rule_modified = excluded.rule_modified,
+                            rule_failed = excluded.rule_failed,
+                            matched_rule_ids_json = excluded.matched_rule_ids_json,
+                            applied_rule_ids_json = excluded.applied_rule_ids_json,
+                            skipped_rule_ids_json = excluded.skipped_rule_ids_json,
+                            failed_rule_ids_json = excluded.failed_rule_ids_json,
+                            rule_evaluation_json = excluded.rule_evaluation_json,
                             record_file = excluded.record_file,
                             indexed_at = excluded.indexed_at
                         """,
@@ -803,6 +896,7 @@ class CaptureIndexStore:
         saved_route_runs: list[dict[str, Any]] = []
         saved_drafts: list[dict[str, Any]] = []
         saved_replay_runs: list[dict[str, Any]] = []
+        saved_rules: list[dict[str, Any]] = []
         if self.db_path.is_file():
             try:
                 with self._connect() as conn:
@@ -836,6 +930,10 @@ class CaptureIndexStore:
                         "SELECT * FROM replay_runs ORDER BY replayed_at ASC"
                     ).fetchall()
                     saved_replay_runs = [dict(r) for r in rpl_rows]
+                    rule_rows = conn.execute(
+                        "SELECT * FROM modification_rules ORDER BY priority ASC, created_at ASC, rule_id ASC"
+                    ).fetchall()
+                    saved_rules = [dict(r) for r in rule_rows]
             except Exception:
                 pass
 
@@ -853,6 +951,7 @@ class CaptureIndexStore:
             or saved_route_runs
             or saved_drafts
             or saved_replay_runs
+            or saved_rules
         ):
             with self._connect() as conn:
                 if saved_policy is not None:
@@ -1060,6 +1159,28 @@ class CaptureIndexStore:
                             rpl["error_message"],
                         ),
                     )
+                for rl in saved_rules:
+                    conn.execute(
+                        """
+                        INSERT INTO modification_rules (
+                            rule_id, name, description, enabled, priority,
+                            match_json, actions_json, copied_from_rule_id,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            rl["rule_id"],
+                            rl["name"],
+                            rl["description"],
+                            rl["enabled"],
+                            rl["priority"],
+                            rl["match_json"],
+                            rl["actions_json"],
+                            rl["copied_from_rule_id"],
+                            rl["created_at"],
+                            rl["updated_at"],
+                        ),
+                    )
                 conn.commit()
 
         result = self.import_all_captures()
@@ -1088,7 +1209,9 @@ class CaptureIndexStore:
             "schema_version": INDEX_SCHEMA_VERSION,
             "db_path": str(self.db_path),
             "raw_capture_files": raw_files,
+            "capture_files_on_disk": raw_files,
             "total_indexed": total_indexed,
+            "indexed_captures": total_indexed,
             "import_errors_count": len(err_rows),
             "import_errors": [dict(r) for r in err_rows],
             "migrations": [dict(m) for m in migrations],
@@ -1111,6 +1234,13 @@ class CaptureIndexStore:
         response_status: int | None = None,
         source_capture_id: str | None = None,
         draft_id: str | None = None,
+        rule_id: str | None = None,
+        applied_rule_id: str | None = None,
+        failed_rule_id: str | None = None,
+        skipped_rule_id: str | None = None,
+        rule_modified: bool | None = None,
+        rule_failed: bool | None = None,
+        rule_outcome: str | None = None,
     ) -> dict[str, Any]:
         self.ensure_schema()
 
@@ -1176,6 +1306,46 @@ class CaptureIndexStore:
             )
             params.append(draft_id.strip())
 
+        if rule_id:
+            rid_tok = f'"{rule_id.strip()}"'
+            where_clauses.append(
+                "(matched_rule_ids_json LIKE ? OR applied_rule_ids_json LIKE ? OR skipped_rule_ids_json LIKE ? OR failed_rule_ids_json LIKE ?)"
+            )
+            params.extend([f"%{rid_tok}%"] * 4)
+
+        if applied_rule_id:
+            where_clauses.append("applied_rule_ids_json LIKE ?")
+            params.append(f'%"{applied_rule_id.strip()}"%')
+
+        if failed_rule_id:
+            where_clauses.append("failed_rule_ids_json LIKE ?")
+            params.append(f'%"{failed_rule_id.strip()}"%')
+
+        if skipped_rule_id:
+            where_clauses.append("skipped_rule_ids_json LIKE ?")
+            params.append(f'%"{skipped_rule_id.strip()}"%')
+
+        if rule_modified is not None:
+            where_clauses.append("rule_modified = ?")
+            params.append(1 if rule_modified else 0)
+
+        if rule_failed is not None:
+            where_clauses.append("rule_failed = ?")
+            params.append(1 if rule_failed else 0)
+
+        if rule_outcome:
+            oc = rule_outcome.strip().lower()
+            if oc in ("applied", "modified"):
+                where_clauses.append("rule_modified = 1")
+            elif oc == "failed":
+                where_clauses.append("rule_failed = 1")
+            elif oc == "skipped":
+                where_clauses.append("skipped_rule_ids_json != '[]'")
+            elif oc == "matched":
+                where_clauses.append("matched_rule_ids_json != '[]'")
+            elif oc in ("none", "unmatched"):
+                where_clauses.append("matched_rule_ids_json = '[]'")
+
         where_sql = (
             "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
         )
@@ -1200,7 +1370,10 @@ class CaptureIndexStore:
                     replayable, is_websocket, body_size, captured_body_size,
                     body_sha256, blob_ref, content_type, content_encoding,
                     content_kind, response_status, target_service, duration_ms,
-                    proxy_error, has_parse_errors, record_file, indexed_at
+                    proxy_error, has_parse_errors, rule_modified, rule_failed,
+                    matched_rule_ids_json, applied_rule_ids_json,
+                    skipped_rule_ids_json, failed_rule_ids_json,
+                    rule_evaluation_json, record_file, indexed_at
                 FROM captures_index
                 {where_sql}
                 {order_sql}
@@ -1250,6 +1423,14 @@ class CaptureIndexStore:
                     "capture_status": r["capture_status"],
                     "message": str(exc),
                 }
+            rule_eval_raw = r["rule_evaluation_json"]
+            rule_eval_obj = (
+                json.loads(rule_eval_raw) if rule_eval_raw else {}
+            )
+            matched_ids = json.loads(r["matched_rule_ids_json"] or "[]")
+            applied_ids = json.loads(r["applied_rule_ids_json"] or "[]")
+            skipped_ids = json.loads(r["skipped_rule_ids_json"] or "[]")
+            failed_ids = json.loads(r["failed_rule_ids_json"] or "[]")
             items.append(
                 {
                     "capture_id": cid,
@@ -1282,6 +1463,26 @@ class CaptureIndexStore:
                     "has_parse_errors": bool(r["has_parse_errors"]),
                     "record_file": r["record_file"],
                     "replay_lineage": rpl_map.get(cid),
+                    "rule_modified": bool(r["rule_modified"]),
+                    "rule_failed": bool(r["rule_failed"]),
+                    "matched_rule_ids": matched_ids,
+                    "applied_rule_ids": applied_ids,
+                    "skipped_rule_ids": skipped_ids,
+                    "failed_rule_ids": failed_ids,
+                    "rule_evaluation": {
+                        "evaluated": bool(rule_eval_obj.get("evaluated", False)),
+                        "modified": bool(r["rule_modified"]),
+                        "rule_modified": bool(r["rule_modified"]),
+                        "has_failures": bool(r["rule_failed"]),
+                        "rule_failed": bool(r["rule_failed"]),
+                        "outcome": rule_eval_obj.get("outcome", "no_match"),
+                        "matched_rule_ids": matched_ids,
+                        "applied_rule_ids": applied_ids,
+                        "skipped_rule_ids": skipped_ids,
+                        "failed_rule_ids": failed_ids,
+                        "change_count": int(rule_eval_obj.get("change_count", 0)),
+                        "change_summary": rule_eval_obj.get("change_summary", []),
+                    },
                 }
             )
 
@@ -1302,6 +1503,13 @@ class CaptureIndexStore:
                 "response_status": response_status,
                 "source_capture_id": source_capture_id,
                 "draft_id": draft_id,
+                "rule_id": rule_id,
+                "applied_rule_id": applied_rule_id,
+                "failed_rule_id": failed_rule_id,
+                "skipped_rule_id": skipped_rule_id,
+                "rule_modified": rule_modified,
+                "rule_failed": rule_failed,
+                "rule_outcome": rule_outcome,
             },
             "items": items,
             "import_errors_count": len(err_rows),
@@ -1387,6 +1595,37 @@ class CaptureIndexStore:
             capture_id
         )
         out["replayability"] = rpl_eval
+        if "rule_evaluation" not in out or out["rule_evaluation"] is None:
+            out["rule_evaluation"] = {
+                "evaluated": False,
+                "modified": False,
+                "rule_modified": False,
+                "has_failures": False,
+                "rule_failed": False,
+                "outcome": "no_match",
+                "matched_rule_ids": [],
+                "applied_rule_ids": [],
+                "skipped_rule_ids": [],
+                "failed_rule_ids": [],
+                "change_count": 0,
+                "change_summary": [],
+                "rules": [],
+            }
+        else:
+            re_obj = out["rule_evaluation"]
+            re_obj.setdefault("rule_modified", bool(re_obj.get("modified", False)))
+            re_obj.setdefault("rule_failed", bool(re_obj.get("has_failures", False)))
+            if "outcome" not in re_obj:
+                if re_obj.get("rule_modified"):
+                    re_obj["outcome"] = "applied"
+                elif re_obj.get("rule_failed"):
+                    re_obj["outcome"] = "failed"
+                elif out.get("is_websocket") and re_obj.get("skipped_rule_ids"):
+                    re_obj["outcome"] = "skipped_websocket"
+                elif re_obj.get("skipped_rule_ids"):
+                    re_obj["outcome"] = "skipped"
+                else:
+                    re_obj["outcome"] = "no_match"
         return out
 
     def get_retention_policy(self) -> dict[str, Any]:
