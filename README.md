@@ -25,4 +25,4 @@ ProxyConsole 是一个面向 WSL/Docker 本地环境的可观测反向代理管�
 
 ## 当前下一步
 
-`DEV-031`：在 Web console 中实现请求列表、详情、draft 编辑、安全重放以及 cURL/fetch 导出。任务通过 Git mailbox 自动派发，不需要用户转发提示词。
+`DEV-040`：实现持久化的自动请求修改规则，对匹配的未来请求修改 query、header、cookie、JSON 或 form，并保留可追踪的应用结果。任务通过 Git mailbox 自动派发，不需要用户转发提示词。
