@@ -1,13 +1,13 @@
 {
   "protocol_version": 1,
-  "handled_dispatch_id": 9,
-  "task_id": "DEV-031",
-  "state": "ready_for_review",
-  "owner": "orchestrator",
-  "updated_at": "2026-11-07T07:25:45Z",
-  "artifact_commit": "605ed2d",
-  "verification_command": "make clean && make config-test && make test && make down",
-  "verification_passed": true,
-  "summary": "DEV-031 Web request viewer / editor / replay console の実装およびヘッドレスブラウザ E2E テスト（AC-1〜AC-14）を含む全 9 統合テストスイートの検証が完了しました。",
+  "handled_dispatch_id": 10,
+  "task_id": "DEV-040",
+  "state": "working",
+  "owner": "implementer",
+  "updated_at": "2026-11-07T08:27:30Z",
+  "artifact_commit": null,
+  "verification_command": null,
+  "verification_passed": null,
+  "summary": "dispatch 10 (DEV-040: Automatic request modification rule core) を受領し、実装と統合テスト検証を開始しました。",
   "blocker": null
 }
