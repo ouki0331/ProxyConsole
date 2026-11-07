@@ -1,19 +1,19 @@
 {
   "protocol_version": 1,
-  "dispatch_id": 7,
-  "issued_at": "2026-11-07T14:04:28+09:00",
+  "dispatch_id": 8,
+  "issued_at": "2026-11-07T14:49:55+09:00",
   "issued_by": "orchestrator",
   "recipient": "implementer",
   "command": "execute_task",
-  "task_id": "DEV-022",
-  "task_file": "docs/tasks/DEV-022.md",
-  "base_commit": "d2c1fae",
+  "task_id": "DEV-030",
+  "task_file": "docs/tasks/DEV-030.md",
+  "base_commit": "a00749f",
   "previous_task": {
-    "task_id": "DEV-021",
+    "task_id": "DEV-022",
     "decision": "approved",
-    "review_file": "docs/reviews/DEV-021-review-001.md"
+    "review_file": "docs/reviews/DEV-022-review-001.md"
   },
-  "required_action": "Pull origin/main, acknowledge dispatch 7, execute DEV-022, push evidence, then wait for review.",
+  "required_action": "Pull origin/main, acknowledge dispatch 8, execute DEV-030, push evidence, then wait for review.",
   "state": "assigned"
 }
 

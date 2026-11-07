@@ -2,8 +2,8 @@
 
 更新日: 2026-11-06  
 計画状態: Active  
-現在フェーズ: P3 — ルート管理と Docker 発見
-実装状態: DEV-021 approved / DEV-022 in progress
+現在フェーズ: P4 — 編集、リプレイ、出力
+実装状態: G3 passed / DEV-030 in progress
 
 ## 1. バージョン目標
 
@@ -199,5 +199,5 @@ G4 不合格時:
 
 ## 7. 次に開始できるタスク
 
-`DEV-022`。DEV-020 の route 管理 core と DEV-021 の Docker discovery が独立レビューで合格したため、Web console から両機能を統合するユーザー可視フローを開始できる。
+`DEV-030`。DEV-020〜DEV-022 が独立レビューで合格して G3 を通過したため、保存済み request の draft、編集、replay、cURL/fetch export core を開始できる。
 
