@@ -13,7 +13,7 @@
     "decision": "changes_requested",
     "review_file": "docs/reviews/DEV-040-review-001.md"
   },
-  "required_action": "Pull origin/main, acknowledge dispatch 11, read docs/reviews/DEV-040-review-001.md, fix all three blocking findings with regression tests, push evidence, then wait for review.",
-  "state": "assigned"
+  "required_action": "No further action for dispatch 11. This Agent task timed out after 120 minutes without substantive progress; wait for a new dispatch before resuming.",
+  "state": "timed_out"
 }
 
