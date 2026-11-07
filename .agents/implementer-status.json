@@ -1,13 +1,13 @@
 {
   "protocol_version": 1,
-  "handled_dispatch_id": 6,
-  "task_id": "DEV-021",
-  "state": "ready_for_review",
-  "owner": "orchestrator",
-  "updated_at": "2026-11-07T04:20:20Z",
-  "artifact_commit": "e9c0322",
-  "verification_command": "make clean && make config-test && make test && make down",
-  "verification_passed": true,
-  "summary": "DEV-021（Docker discovery と route target 選択）の実装・全統合テスト検証（DEV-001〜DEV-021）を完了し、Ready for review へ更新しました。",
+  "handled_dispatch_id": 7,
+  "task_id": "DEV-022",
+  "state": "working",
+  "owner": "implementer",
+  "updated_at": "2026-11-07T05:22:00Z",
+  "artifact_commit": null,
+  "verification_command": null,
+  "verification_passed": null,
+  "summary": "dispatch 7 (DEV-022: Web route / Docker 管理 console) を受領し、実装と browser-level 検証を開始しました。",
   "blocker": null
 }
