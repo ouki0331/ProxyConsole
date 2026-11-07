@@ -34,7 +34,7 @@ for _ in $(seq 1 30); do
       "http://127.0.0.1:${CONTROL_API_PORT}/api/v1/health" || true
   )"
   if [[ "${status_code}" == "200" && "${api_code}" == "200" ]]; then
-    echo "[up] Proxy chain is ready on https://127.0.0.1:${EDGE_HTTPS_PORT} (API: http://127.0.0.1:${CONTROL_API_PORT})"
+    echo "[up] Proxy chain is ready on https://127.0.0.1:${EDGE_HTTPS_PORT} (Console & API: http://127.0.0.1:${CONTROL_API_PORT}/)"
     exit 0
   fi
   sleep 0.5

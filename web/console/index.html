@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ProxyConsole — Route &amp; Docker Target Management</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-brand">
+      <h1>ProxyConsole</h1>
+      <span class="subtitle">Localhost Route &amp; Docker Target Console</span>
+    </div>
+    <div class="header-actions">
+      <button type="button" id="refresh-all-btn" class="btn btn-secondary">
+        Refresh State
+      </button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- Feedback / Alert Banner -->
+    <section id="feedback-banner" class="feedback-banner" role="status" aria-live="polite" data-state="idle" data-error-code="">
+      <div class="feedback-content">
+        <strong id="feedback-title">Ready</strong>
+        <span id="feedback-message">Loaded route and Docker discovery state from local control API.</span>
+        <span id="feedback-hint" class="feedback-hint"></span>
+      </div>
+    </section>
+
+    <!-- Routing & Nginx Apply Status Panel -->
+    <section id="apply-status-panel" class="card status-card" aria-labelledby="apply-status-heading">
+      <div class="status-header">
+        <h2 id="apply-status-heading">Nginx Router Apply Status</h2>
+        <div class="status-badges">
+          <span id="apply-sync-badge" class="badge badge-neutral" data-in-sync="true">Checking...</span>
+          <span id="apply-status-text" class="badge badge-outline">applied</span>
+        </div>
+      </div>
+      <div class="status-metrics">
+        <div class="metric-item">
+          <span class="metric-label">Generation (Desired / Applied)</span>
+          <strong id="apply-generation-text">1 / 1</strong>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">Active Config SHA-256</span>
+          <code id="apply-sha-text">-</code>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">Last Apply Time</span>
+          <span id="apply-time-text">-</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">Routes (Enabled / Total)</span>
+          <strong id="routes-count-badge">0 / 0</strong>
+        </div>
+      </div>
+
+      <div id="apply-error-box" class="apply-error-box" hidden>
+        <div class="apply-error-details">
+          <strong>Last Apply / Validation / Reload Error:</strong>
+          <pre id="apply-error-message"></pre>
+          <span id="apply-rollback-note" class="rollback-note"></span>
+        </div>
+        <div class="apply-error-actions">
+          <button type="button" id="retry-apply-btn" class="btn btn-primary">
+            Retry Apply Config
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div class="workspace-grid">
+      <!-- Left Column: Configured Routes Table & Docker Discovery Table -->
+      <div class="workspace-primary">
+        <!-- Routes Table Card -->
+        <section id="routes-section" class="card" aria-labelledby="routes-heading">
+          <div class="card-header">
+            <div>
+              <h2 id="routes-heading">Domain Routes</h2>
+              <p class="card-subtitle">Host header routing rules persisted in SQLite and applied atomically to internal Nginx router.</p>
+            </div>
+            <button type="button" id="new-route-btn" class="btn btn-primary">
+              + New Route
+            </button>
+          </div>
+
+          <div id="routes-empty-state" class="empty-state" hidden>
+            <p>No domain routes are currently registered. Create a route using the form.</p>
+          </div>
+
+          <div tabindex="0" role="region" aria-labelledby="routes-table-caption" class="table-wrapper">
+            <table id="routes-table">
+              <caption id="routes-table-caption" class="visually-hidden">Configured domain routes and upstream targets</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Domain</th>
+                  <th scope="col">Enabled</th>
+                  <th scope="col">Upstream</th>
+                  <th scope="col">Target Type</th>
+                  <th scope="col">Target State</th>
+                  <th scope="col">Apply Status</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="routes-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Docker Discovery Card -->
+        <section id="docker-discovery-section" class="card" aria-labelledby="discovery-heading">
+          <div class="card-header">
+            <div>
+              <h2 id="discovery-heading">Docker Containers &amp; Port Candidates</h2>
+              <p class="card-subtitle">Discovered via control-api Docker Engine socket. Select a running port candidate to populate the route form.</p>
+            </div>
+            <div class="discovery-controls">
+              <span id="discovery-availability-badge" class="badge badge-neutral" data-available="true">Checking...</span>
+              <button type="button" id="refresh-discovery-btn" class="btn btn-secondary">
+                Refresh Docker
+              </button>
+            </div>
+          </div>
+
+          <div class="discovery-filters">
+            <label class="checkbox-inline" for="include-self-checkbox">
+              <input type="checkbox" id="include-self-checkbox" name="include_self">
+              <span>Show ProxyConsole system containers (read-only)</span>
+            </label>
+          </div>
+
+          <div id="discovery-error-box" class="discovery-error-box" role="alert" hidden>
+            <div class="discovery-error-text">
+              <strong>Docker Discovery Unavailable:</strong>
+              <span id="discovery-error-message"></span>
+              <p class="fallback-note">Existing routes remain active. You can continue creating and editing routes using Manual Scheme / Host / Port mode.</p>
+            </div>
+            <button type="button" id="switch-to-manual-btn" class="btn btn-secondary">
+              Use Manual Host/Port Input
+            </button>
+          </div>
+
+          <div id="discovery-empty-state" class="empty-state" hidden>
+            <p>No Docker containers matched the current filter.</p>
+          </div>
+
+          <div tabindex="0" role="region" aria-labelledby="docker-table-caption" class="table-wrapper">
+            <table id="docker-containers-table">
+              <caption id="docker-table-caption" class="visually-hidden">Discovered Docker containers and selectable upstream ports</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Container / Service</th>
+                  <th scope="col">State</th>
+                  <th scope="col">Internal Network &amp; Host</th>
+                  <th scope="col">Port Candidate</th>
+                  <th scope="col">Published</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody id="docker-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right Column: Create / Edit Route Form -->
+      <aside class="workspace-sidebar">
+        <section id="route-form-section" class="card" aria-labelledby="route-form-title">
+          <div class="card-header">
+            <h2 id="route-form-title">Create New Route</h2>
+            <span id="route-form-mode-badge" class="badge badge-outline">Create Mode</span>
+          </div>
+
+          <form id="route-form" action="/api/v1/routes" method="POST" novalidate>
+            <input type="hidden" id="route-edit-mode" name="edit_mode" value="create">
+            <input type="hidden" id="route-original-id" name="original_route_id" value="">
+
+            <div class="form-group">
+              <label for="route-domain">Domain (Host header) <span class="required-mark">*</span></label>
+              <input
+                type="text"
+                id="route-domain"
+                name="domain"
+                required
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="e.g. api.local.test"
+                aria-describedby="route-domain-hint route-domain-error"
+              >
+              <span id="route-domain-hint" class="field-hint">Lowercase hostname matched by internal Nginx server_name.</span>
+              <span id="route-domain-error" class="field-error" role="alert"></span>
+            </div>
+
+            <div class="form-group">
+              <label for="route-id-input">Route ID (optional)</label>
+              <input
+                type="text"
+                id="route-id-input"
+                name="route_id"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="Auto-generated if left blank"
+                aria-describedby="route-id-hint"
+              >
+              <span id="route-id-hint" class="field-hint">Stable identifier such as route:my-app.</span>
+            </div>
+
+            <fieldset class="form-fieldset">
+              <legend>Upstream Target Selection Mode</legend>
+              <div class="radio-group">
+                <label class="radio-option" for="mode-docker">
+                  <input type="radio" id="mode-docker" name="target_mode" value="docker" checked>
+                  <span>Docker Container / Port</span>
+                </label>
+                <label class="radio-option" for="mode-manual">
+                  <input type="radio" id="mode-manual" name="target_mode" value="manual">
+                  <span>Manual Scheme / Host / Port</span>
+                </label>
+              </div>
+            </fieldset>
+
+            <!-- Docker Target Selection Fields -->
+            <div id="docker-target-fields" class="target-mode-panel">
+              <div class="form-group">
+                <label for="route-target-select">Discovered Container + Port <span class="required-mark">*</span></label>
+                <select
+                  id="route-target-select"
+                  name="target_id"
+                  aria-describedby="route-target-hint route-target-error"
+                >
+                  <option value="">-- Select a running container:port --</option>
+                </select>
+                <span id="route-target-hint" class="field-hint">Multiple routes can share the same container and port.</span>
+                <span id="route-target-error" class="field-error" role="alert"></span>
+              </div>
+            </div>
+
+            <!-- Manual Upstream Fields -->
+            <div id="manual-target-fields" class="target-mode-panel" hidden>
+              <div class="form-group">
+                <label for="route-upstream-scheme">Upstream Scheme <span class="required-mark">*</span></label>
+                <select id="route-upstream-scheme" name="upstream_scheme">
+                  <option value="http">http</option>
+                  <option value="https">https</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="route-upstream-host">Upstream Host / IP <span class="required-mark">*</span></label>
+                <input
+                  type="text"
+                  id="route-upstream-host"
+                  name="upstream_host"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  placeholder="e.g. echo-a or 172.18.0.5"
+                  aria-describedby="route-host-error"
+                >
+                <span id="route-host-error" class="field-error" role="alert"></span>
+              </div>
+
+              <div class="form-group">
+                <label for="route-upstream-port">Upstream Port (1–65535) <span class="required-mark">*</span></label>
+                <input
+                  type="text"
+                  id="route-upstream-port"
+                  name="upstream_port"
+                  inputmode="numeric"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  placeholder="8080"
+                  aria-describedby="route-port-error"
+                >
+                <span id="route-port-error" class="field-error" role="alert"></span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="route-description">Description</label>
+              <input
+                type="text"
+                id="route-description"
+                name="description"
+                placeholder="Optional note about this route"
+              >
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-inline" for="route-enabled-checkbox">
+                <input type="checkbox" id="route-enabled-checkbox" name="enabled" checked>
+                <span>Enable route immediately in Nginx router</span>
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" id="route-submit-btn" class="btn btn-primary">
+                Save &amp; Apply Route
+              </button>
+              <button type="button" id="route-cancel-edit-btn" class="btn btn-secondary">
+                Reset Form
+              </button>
+            </div>
+          </form>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <!-- Native Modal Dialog: Copy Route (Requires new non-conflicting domain) -->
+  <dialog id="copy-route-dialog" aria-labelledby="copy-dialog-title">
+    <h2 id="copy-dialog-title">Copy Route to New Domain</h2>
+    <p id="copy-source-summary" class="dialog-summary"></p>
+    <form id="copy-route-form" method="dialog" novalidate>
+      <input type="hidden" id="copy-source-route-id" name="source_route_id" value="">
+
+      <div class="form-group">
+        <label for="copy-new-domain">New Domain <span class="required-mark">*</span></label>
+        <input
+          type="text"
+          id="copy-new-domain"
+          name="domain"
+          required
+          autofocus
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="e.g. app-a-staging.local.test"
+          aria-describedby="copy-domain-hint copy-domain-error"
+        >
+        <span id="copy-domain-hint" class="field-hint">Must be a new domain different from the source route.</span>
+        <span id="copy-domain-error" class="field-error" role="alert"></span>
+      </div>
+
+      <div class="form-group">
+        <label for="copy-new-route-id">New Route ID (optional)</label>
+        <input
+          type="text"
+          id="copy-new-route-id"
+          name="route_id"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="Auto-generated if left blank"
+        >
+      </div>
+
+      <div class="form-group">
+        <label for="copy-new-description">Description</label>
+        <input
+          type="text"
+          id="copy-new-description"
+          name="description"
+          placeholder="Copied route description"
+        >
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" id="copy-cancel-btn" class="btn btn-secondary" value="cancel">
+          Cancel
+        </button>
+        <button type="submit" id="copy-confirm-btn" class="btn btn-primary" value="confirm">
+          Copy &amp; Apply Route
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Native Modal Dialog: Destructive Delete Confirmation -->
+  <dialog id="delete-route-dialog" aria-labelledby="delete-dialog-title">
+    <h2 id="delete-dialog-title">Confirm Route Deletion</h2>
+    <p class="dialog-summary">
+      Are you sure you want to delete route
+      <strong id="delete-target-route-id"></strong>
+      for domain
+      <strong id="delete-target-domain"></strong>?
+    </p>
+    <p class="field-hint">This will immediately remove the domain from the active Nginx internal router configuration (requests to this domain will return HTTP 404).</p>
+    <form id="delete-route-form" method="dialog">
+      <input type="hidden" id="delete-route-id-input" name="route_id" value="">
+      <div class="dialog-actions">
+        <button type="button" id="delete-cancel-btn" class="btn btn-secondary" value="cancel" autofocus>
+          Cancel
+        </button>
+        <button type="submit" id="delete-confirm-btn" class="btn btn-danger" value="delete">
+          Delete Route
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

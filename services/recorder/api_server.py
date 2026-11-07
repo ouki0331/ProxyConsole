@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import signal
 import sys
 import threading
@@ -27,6 +28,14 @@ from route_manager import (
 
 API_HOST = os.environ.get("CONTROL_API_LISTEN_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("CONTROL_API_PORT", "18480"))
+WEB_CONSOLE_DIR = Path(
+    os.environ.get(
+        "WEB_CONSOLE_DIR",
+        str(Path(__file__).resolve().parent.parent.parent / "web" / "console"),
+    )
+)
+if not WEB_CONSOLE_DIR.is_dir() and Path("/app/web/console").is_dir():
+    WEB_CONSOLE_DIR = Path("/app/web/console")
 
 PERIODIC_WAKE_EVENT = threading.Event()
 LAST_PERIODIC_RESET_LOCK = threading.Lock()
@@ -75,6 +84,25 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_static_file(self, filename: str, content_type: str) -> None:
+        file_path = WEB_CONSOLE_DIR / filename
+        if not file_path.is_file():
+            self._send_json(
+                404,
+                {
+                    "error": "console_asset_not_found",
+                    "filename": filename,
+                },
+            )
+            return
+        body = file_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _read_json_body(self) -> dict[str, Any]:
         cl = int(self.headers.get("Content-Length", "0") or "0")
         if cl <= 0:
@@ -93,6 +121,30 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
         qs = parse_qs(split.query, keep_blank_values=False)
 
         try:
+            if path in ("/", "/index.html", "/console", "/console/index.html"):
+                self._send_static_file(
+                    "index.html", "text/html; charset=utf-8"
+                )
+                return
+
+            if path in ("/styles.css", "/console/styles.css"):
+                self._send_static_file(
+                    "styles.css", "text/css; charset=utf-8"
+                )
+                return
+
+            if path in ("/app.js", "/console/app.js"):
+                self._send_static_file(
+                    "app.js", "application/javascript; charset=utf-8"
+                )
+                return
+
+            if path == "/favicon.ico":
+                self.send_response(204)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
             if path == "/api/v1/health":
                 self._send_json(200, {"status": "ok"})
                 return

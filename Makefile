@@ -19,6 +19,7 @@ test:
 	./tests/integration/test_retention_cleanup.sh
 	./tests/integration/test_route_management.sh
 	./tests/integration/test_docker_discovery.sh
+	./tests/integration/test_web_console.sh
 
 clean:
 	./scripts/down.sh
