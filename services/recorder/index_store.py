@@ -18,7 +18,7 @@ import sqlite3
 from typing import Any, Iterator
 
 from docker_discovery import DockerDiscoveryService
-from draft_replay import DraftReplayManager
+from draft_replay import DraftReplayManager, decode_path_human_readable
 from parser import build_derived_views
 from retention import (
     DEFAULT_HARD_LIMIT_BYTES,
@@ -1238,6 +1238,18 @@ class CaptureIndexStore:
         items: list[dict[str, Any]] = []
         for r in rows:
             cid = r["capture_id"]
+            try:
+                rpl_chk = self.drafts.evaluate_replayability(
+                    cid, raise_on_false=False
+                )
+            except Exception as exc:
+                rpl_chk = {
+                    "capture_id": cid,
+                    "replayable": False,
+                    "reason": "missing_record",
+                    "capture_status": r["capture_status"],
+                    "message": str(exc),
+                }
             items.append(
                 {
                     "capture_id": cid,
@@ -1253,7 +1265,8 @@ class CaptureIndexStore:
                     "raw_query": r["raw_query"],
                     "http_version": r["http_version"],
                     "capture_status": r["capture_status"],
-                    "replayable": bool(r["replayable"]),
+                    "replayable": bool(rpl_chk.get("replayable")),
+                    "replayability": rpl_chk,
                     "is_websocket": bool(r["is_websocket"]),
                     "body_size": r["body_size"],
                     "captured_body_size": r["captured_body_size"],
@@ -1316,15 +1329,21 @@ class CaptureIndexStore:
         blob_ref = body_meta.get("blob_ref")
 
         blob_bytes = b""
+        blob_missing = False
         if blob_ref:
             blob_path = self.storage_dir / blob_ref
             if not blob_path.is_file():
-                raise FileNotFoundError(f"Blob file not found: {blob_path}")
-            blob_bytes = blob_path.read_bytes()
+                blob_missing = True
+            else:
+                blob_bytes = blob_path.read_bytes()
 
-        blob_sha256 = hashlib.sha256(blob_bytes).hexdigest()
-        captured_size_matches = len(blob_bytes) == body_meta.get("captured_size", 0)
-        if record.get("capture_status") == "complete":
+        blob_sha256 = (
+            hashlib.sha256(blob_bytes).hexdigest() if not blob_missing else None
+        )
+        captured_size_matches = (not blob_missing) and (
+            len(blob_bytes) == body_meta.get("captured_size", 0)
+        )
+        if record.get("capture_status") == "complete" and not blob_missing:
             sha256_matches = blob_sha256 == body_meta.get("sha256")
         else:
             sha256_matches = False
@@ -1332,16 +1351,33 @@ class CaptureIndexStore:
         regenerated_views = build_derived_views(
             raw_query=req.get("raw_query", ""),
             headers=req.get("headers", []),
-            raw_body=blob_bytes if record.get("capture_status") == "complete" else None,
+            raw_body=(
+                blob_bytes
+                if (record.get("capture_status") == "complete" and not blob_missing)
+                else None
+            ),
             content_type=body_meta.get("content_type"),
-            capture_status=record.get("capture_status", "complete"),
+            capture_status=(
+                record.get("capture_status", "complete")
+                if not blob_missing
+                else "missing_blob"
+            ),
+        )
+        regenerated_views["decoded_path"] = decode_path_human_readable(
+            req.get("raw_path", "/")
+        )
+
+        rpl_eval = self.drafts.evaluate_replayability(
+            capture_id, raise_on_false=False
         )
 
         out = dict(record)
+        out["replayable"] = bool(rpl_eval.get("replayable"))
         out["indexed"] = idx_row is not None
         out["derived_views"] = regenerated_views
         out["regenerated_derived_views"] = regenerated_views
         out["reader_verification"] = {
+            "blob_missing": blob_missing,
             "blob_bytes_len": len(blob_bytes),
             "blob_sha256": blob_sha256,
             "captured_size_matches": captured_size_matches,
@@ -1350,9 +1386,7 @@ class CaptureIndexStore:
         out["replay_relations"] = self.drafts.get_capture_replay_relations(
             capture_id
         )
-        out["replayability"] = self.drafts.evaluate_replayability(
-            capture_id, raise_on_false=False
-        )
+        out["replayability"] = rpl_eval
         return out
 
     def get_retention_policy(self) -> dict[str, Any]:

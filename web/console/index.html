@@ -10,8 +10,19 @@
   <header class="app-header">
     <div class="header-brand">
       <h1>ProxyConsole</h1>
-      <span class="subtitle">Localhost Route &amp; Docker Target Console</span>
+      <span class="subtitle">Localhost Route, Docker Target, Request Viewer &amp; Replay Console</span>
     </div>
+    <nav aria-label="Console Workspaces" class="header-nav">
+      <button type="button" id="view-all-btn" class="btn btn-sm btn-secondary" aria-pressed="true">
+        All Workspaces
+      </button>
+      <button type="button" id="view-routes-btn" class="btn btn-sm btn-secondary" aria-pressed="false">
+        Routes &amp; Docker
+      </button>
+      <button type="button" id="view-requests-btn" class="btn btn-sm btn-secondary" aria-pressed="false">
+        Requests &amp; Replay
+      </button>
+    </nav>
     <div class="header-actions">
       <button type="button" id="refresh-all-btn" class="btn btn-secondary">
         Refresh State
@@ -29,6 +40,7 @@
       </div>
     </section>
 
+    <div id="routes-workspace" class="console-workspace">
     <!-- Routing & Nginx Apply Status Panel -->
     <section id="apply-status-panel" class="card status-card" aria-labelledby="apply-status-heading">
       <div class="status-header">
@@ -310,6 +322,765 @@
         </section>
       </aside>
     </div>
+    </div>
+
+    <!-- ================================================================
+         DEV-031: Requests List, Capture Detail, Draft Editor, Replay & Export
+         ================================================================ -->
+    <div id="requests-workspace" class="console-workspace">
+      <!-- 1. Captured Requests List, Search, Pagination & Saved Drafts Bar -->
+      <section id="captures-list-section" class="card" aria-labelledby="captures-heading">
+        <div class="card-header">
+          <div>
+            <h2 id="captures-heading">Captured Requests</h2>
+            <p class="card-subtitle">Newest-first durable request index (DEV-010). Select a request to inspect details or create an editable replay draft.</p>
+          </div>
+          <div class="discovery-controls">
+            <span id="captures-total-badge" class="badge badge-outline">0 captures</span>
+            <button type="button" id="refresh-captures-btn" class="btn btn-secondary btn-sm">
+              Refresh Requests
+            </button>
+          </div>
+        </div>
+
+        <!-- Search & Filter Bar -->
+        <search>
+          <form id="captures-filter-form" class="filter-bar" action="/api/v1/captures" method="GET" novalidate>
+            <div class="filter-field">
+              <label for="filter-method-select">Method</label>
+              <select id="filter-method-select" name="method">
+                <option value="">All Methods</option>
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
+                <option value="HEAD">HEAD</option>
+                <option value="OPTIONS">OPTIONS</option>
+              </select>
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-host-input">Host</label>
+              <input
+                type="text"
+                id="filter-host-input"
+                name="host"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="e.g. app-a.local.test"
+              >
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-path-prefix-input">Path Prefix</label>
+              <input
+                type="text"
+                id="filter-path-prefix-input"
+                name="path_prefix"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="e.g. /v1/"
+              >
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-path-input">Exact Path</label>
+              <input
+                type="text"
+                id="filter-path-input"
+                name="path"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="e.g. /v1/orders"
+              >
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-response-status-input">HTTP Status</label>
+              <input
+                type="text"
+                id="filter-response-status-input"
+                name="response_status"
+                inputmode="numeric"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="e.g. 200"
+              >
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-capture-status-select">Capture Status</label>
+              <select id="filter-capture-status-select" name="capture_status">
+                <option value="">All Statuses</option>
+                <option value="complete">complete</option>
+                <option value="truncated">truncated</option>
+                <option value="metadata-only">metadata-only</option>
+                <option value="capture-failed">capture-failed</option>
+              </select>
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-source-capture-input">Source Capture ID</label>
+              <input
+                type="text"
+                id="filter-source-capture-input"
+                name="source_capture_id"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="Filter replays of..."
+              >
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-draft-id-input">Draft ID</label>
+              <input
+                type="text"
+                id="filter-draft-id-input"
+                name="draft_id"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="Filter by draft..."
+              >
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-limit-select">Page Size</label>
+              <select id="filter-limit-select" name="limit">
+                <option value="5">5 / page</option>
+                <option value="10" selected>10 / page</option>
+                <option value="20">20 / page</option>
+                <option value="50">50 / page</option>
+              </select>
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-sort-select">Order</label>
+              <select id="filter-sort-select" name="sort">
+                <option value="desc" selected>Newest First (desc)</option>
+                <option value="asc">Oldest First (asc)</option>
+              </select>
+            </div>
+
+            <div class="filter-actions">
+              <button type="submit" id="captures-filter-submit-btn" class="btn btn-primary btn-sm">
+                Apply Filters
+              </button>
+              <button type="button" id="captures-filter-reset-btn" class="btn btn-secondary btn-sm">
+                Reset Filters
+              </button>
+            </div>
+          </form>
+        </search>
+
+        <div id="captures-empty-state" class="empty-state" hidden>
+          <p>No captured requests matched the current search filters.</p>
+        </div>
+
+        <div tabindex="0" role="region" aria-labelledby="captures-table-caption" class="table-wrapper">
+          <table id="captures-table">
+            <caption id="captures-table-caption" class="visually-hidden">Captured HTTP requests ordered newest first</caption>
+            <thead>
+              <tr>
+                <th scope="col">Capture ID &amp; Timestamp</th>
+                <th scope="col">Method</th>
+                <th scope="col">Host &amp; Target Path</th>
+                <th scope="col">Status</th>
+                <th scope="col">Route / Target</th>
+                <th scope="col">Replayable</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="captures-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div id="captures-pagination-bar" class="pagination-bar">
+          <button type="button" id="captures-prev-page-btn" class="btn btn-secondary btn-sm" disabled>
+            Previous Page
+          </button>
+          <span id="captures-page-info" class="pagination-info" data-offset="0" data-limit="10" data-total="0">
+            Showing 0 of 0
+          </span>
+          <button type="button" id="captures-next-page-btn" class="btn btn-secondary btn-sm" disabled>
+            Next Page
+          </button>
+        </div>
+
+        <!-- Saved Drafts Bar & Draft ID Lookup -->
+        <div id="saved-drafts-bar" class="saved-drafts-bar">
+          <div class="saved-drafts-header">
+            <strong>Saved Persistent Drafts (<span id="saved-drafts-count">0</span>):</strong>
+            <div class="draft-lookup-inline">
+              <label for="lookup-draft-id-input" class="visually-hidden">Load Draft by ID</label>
+              <input
+                type="text"
+                id="lookup-draft-id-input"
+                name="lookup_draft_id"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="Draft ID (e.g. draft:abc...)"
+              >
+              <button type="button" id="lookup-draft-btn" class="btn btn-secondary btn-sm">
+                Load Draft by ID
+              </button>
+            </div>
+          </div>
+          <div id="saved-drafts-list" class="saved-drafts-list"></div>
+        </div>
+      </section>
+
+      <!-- 2. Split Workspace: Request Detail (Left) & Draft Editor / Replay / Export (Right) -->
+      <div class="requests-detail-editor-grid">
+        <!-- Left Panel: Request Detail (Authoritative Immutable Capture) -->
+        <section id="capture-detail-section" class="card" aria-labelledby="capture-detail-heading">
+          <div class="card-header">
+            <div>
+              <h2 id="capture-detail-heading">Request Detail</h2>
+              <p class="card-subtitle">Authoritative raw capture metadata and server-derived views (DEV-010 / DEV-030 contract).</p>
+            </div>
+            <span id="detail-immutability-badge" class="badge badge-outline">Immutable Capture</span>
+          </div>
+
+          <div id="capture-detail-empty" class="empty-state">
+            <p>Select a request from the Captured Requests table above to inspect its ordered headers/query, body, replayability, and lineage.</p>
+          </div>
+
+          <div id="capture-detail-content" hidden>
+            <div id="detail-immutability-banner" class="immutability-callout">
+              <strong>Original Capture Record (Immutable / Read-Only):</strong>
+              <span>Creating or editing a draft never modifies this capture record or its body blob.</span>
+              <div class="immutability-hashes">
+                <span>Capture ID: <code id="detail-capture-id">-</code></span>
+                <span>Body SHA-256: <code id="detail-body-sha256">-</code></span>
+                <span>Body Size: <code id="detail-body-size">0</code> bytes</span>
+              </div>
+            </div>
+
+            <div class="status-metrics detail-metrics">
+              <div class="metric-item">
+                <span class="metric-label">Method &amp; HTTP Version</span>
+                <div>
+                  <span id="detail-method" class="badge badge-outline">GET</span>
+                  <code id="detail-http-version">HTTP/1.1</code>
+                </div>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">Response / Capture Status</span>
+                <div>
+                  <span id="detail-response-status" class="badge badge-neutral">-</span>
+                  <span id="detail-capture-status" class="badge badge-neutral">-</span>
+                </div>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">Route / Target Service</span>
+                <code id="detail-route-target">-</code>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">Captured At / Duration</span>
+                <span id="detail-timestamps">-</span>
+              </div>
+            </div>
+
+            <!-- Decoded vs Wire URL Representation -->
+            <div id="detail-url-box" class="wire-comparison-box">
+              <h3>Human-Readable Decoded vs. Wire URL</h3>
+              <dl class="kv-grid">
+                <dt>Wire Full URL</dt>
+                <dd><code id="detail-wire-url">-</code></dd>
+                <dt>Decoded Path (Human-Readable)</dt>
+                <dd><code id="detail-decoded-path">-</code></dd>
+                <dt>Wire Raw Path (Percent-Encoded)</dt>
+                <dd><code id="detail-raw-path">-</code></dd>
+                <dt>Wire Raw Query</dt>
+                <dd><code id="detail-raw-query">-</code></dd>
+              </dl>
+            </div>
+
+            <!-- Replayability Status & Create Draft Action -->
+            <div id="detail-replayability-box" class="replayability-box" data-replayable="true" data-reason="">
+              <div class="replayability-info">
+                <span id="detail-replayability-badge" class="badge badge-success">Replayable</span>
+                <strong id="detail-replayability-reason">complete</strong>
+                <span id="detail-replayability-message">Capture record is complete and replayable.</span>
+              </div>
+              <div class="replayability-actions">
+                <button type="button" id="detail-create-draft-btn" class="btn btn-primary btn-sm">
+                  + Create Editable Draft
+                </button>
+              </div>
+            </div>
+
+            <!-- Lineage & Replay Relations -->
+            <div id="detail-lineage-box" class="lineage-box">
+              <h3>Replay Lineage &amp; Related Drafts</h3>
+              <div id="detail-parent-lineage" class="lineage-subbox" hidden>
+                <strong>Replayed From:</strong>
+                <span>Source Capture:</span>
+                <button type="button" id="detail-nav-source-capture-btn" class="btn btn-sm btn-secondary"></button>
+                <span id="detail-nav-source-draft-wrap">
+                  <span>Via Draft:</span>
+                  <button type="button" id="detail-nav-source-draft-btn" class="btn btn-sm btn-secondary"></button>
+                </span>
+              </div>
+              <div class="lineage-lists">
+                <div>
+                  <strong>Drafts from this Capture:</strong>
+                  <div id="detail-child-drafts-list" class="chip-list">None</div>
+                </div>
+                <div>
+                  <strong>Replays from this Capture:</strong>
+                  <div id="detail-child-replays-list" class="chip-list">None</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ordered Query Parameters -->
+            <div class="detail-subsection">
+              <h3>Ordered Query Parameters (<span id="detail-query-count">0</span>)</h3>
+              <div tabindex="0" role="region" aria-label="Capture ordered query parameters" class="table-wrapper compact-table">
+                <table id="detail-query-table">
+                  <caption class="visually-hidden">Ordered query parameters preserving duplicate keys</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">#</th>
+                      <th scope="col">Decoded Key</th>
+                      <th scope="col">Decoded Value</th>
+                    </tr>
+                  </thead>
+                  <tbody id="detail-query-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Ordered Request Headers -->
+            <div class="detail-subsection">
+              <h3>Ordered Request Headers (<span id="detail-headers-count">0</span>)</h3>
+              <div tabindex="0" role="region" aria-label="Capture ordered request headers" class="table-wrapper compact-table">
+                <table id="detail-headers-table">
+                  <caption class="visually-hidden">Ordered HTTP request headers preserving duplicate names</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">#</th>
+                      <th scope="col">Header Name</th>
+                      <th scope="col">Header Value</th>
+                    </tr>
+                  </thead>
+                  <tbody id="detail-headers-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Parsed Cookies View -->
+            <div class="detail-subsection">
+              <h3>Parsed Cookies (<span id="detail-cookies-count">0</span>)</h3>
+              <div tabindex="0" role="region" aria-label="Capture parsed cookies" class="table-wrapper compact-table">
+                <table id="detail-cookies-table">
+                  <caption class="visually-hidden">Ordered Cookie key-value pairs</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">#</th>
+                      <th scope="col">Cookie Name</th>
+                      <th scope="col">Cookie Value</th>
+                    </tr>
+                  </thead>
+                  <tbody id="detail-cookies-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Body Metadata, Derived View & Raw Fallback -->
+            <div id="detail-body-section" class="detail-subsection">
+              <h3>Request Body &amp; Derived View</h3>
+              <div class="body-meta-bar">
+                <span>Content-Type: <code id="detail-content-type">-</code></span>
+                <span>Kind: <code id="detail-content-kind">-</code></span>
+                <span>Captured / Total: <code id="detail-captured-bytes">0 / 0</code> bytes</span>
+              </div>
+              <div id="detail-body-parse-errors" class="apply-error-box" hidden></div>
+              <div id="detail-derived-json-wrap" hidden>
+                <strong>Structured JSON View:</strong>
+                <pre tabindex="0" class="code-preview"><code id="detail-derived-json"></code></pre>
+              </div>
+              <div id="detail-derived-form-wrap" hidden>
+                <strong>Structured URL-Encoded Form View (Ordered / Duplicate Keys Preserved):</strong>
+                <div tabindex="0" role="region" aria-label="Capture form fields" class="table-wrapper compact-table">
+                  <table id="detail-derived-form-table">
+                    <caption class="visually-hidden">Decoded form fields preserving duplicate keys</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">#</th>
+                        <th scope="col">Form Key</th>
+                        <th scope="col">Form Value</th>
+                      </tr>
+                    </thead>
+                    <tbody id="detail-derived-form-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="detail-raw-body-wrap">
+                <strong>Raw / Text Fallback Preview:</strong>
+                <pre tabindex="0" class="code-preview"><code id="detail-raw-body-preview">(empty body)</code></pre>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Right Panel: Request Draft Editor, Normalization Preview, Replay & Export -->
+        <section id="draft-editor-section" class="card" aria-labelledby="draft-editor-heading">
+          <div class="card-header">
+            <div>
+              <h2 id="draft-editor-heading">Request Draft Editor, Replay &amp; Export</h2>
+              <p class="card-subtitle">Edit request components safely without mutating the source capture, preview normalized wire bytes, replay, or export as cURL / fetch.</p>
+            </div>
+            <span id="draft-sync-badge" class="badge badge-neutral" data-dirty="false">No Active Draft</span>
+          </div>
+
+          <!-- Error / Expired / Deleted Draft Recovery Box -->
+          <div id="draft-error-recovery-box" class="apply-error-box" role="alert" data-error-code="" hidden>
+            <div class="apply-error-details">
+              <strong id="draft-error-title">Draft Error</strong>
+              <p id="draft-error-message"></p>
+              <span id="draft-error-hint" class="rollback-note"></span>
+            </div>
+            <div class="apply-error-actions">
+              <button type="button" id="draft-recover-recreate-btn" class="btn btn-primary btn-sm">
+                Recreate Draft from Source Capture
+              </button>
+              <button type="button" id="draft-recover-reload-btn" class="btn btn-secondary btn-sm">
+                Reload Saved Draft from Server
+              </button>
+            </div>
+          </div>
+
+          <div id="draft-editor-empty" class="empty-state">
+            <p>Click <strong>Create Draft</strong> on any replayable capture or load a saved draft above to begin editing.</p>
+          </div>
+
+          <div id="draft-editor-content" hidden>
+            <!-- Draft Identity & Persistence Toolbar -->
+            <div class="draft-toolbar">
+              <div class="draft-identity">
+                <span>Draft ID: <code id="draft-id-badge">-</code></span>
+                <span>Source Capture (Immutable):
+                  <button type="button" id="draft-view-source-btn" class="btn btn-sm btn-secondary">-</button>
+                </span>
+              </div>
+              <div class="draft-toolbar-actions">
+                <button type="button" id="draft-save-btn" class="btn btn-primary btn-sm">
+                  Save Draft
+                </button>
+                <button type="button" id="draft-reload-btn" class="btn btn-secondary btn-sm">
+                  Reload Draft
+                </button>
+                <button type="button" id="draft-delete-btn" class="btn btn-danger btn-sm">
+                  Delete Draft
+                </button>
+              </div>
+            </div>
+
+            <!-- Inline Validation Error Callout -->
+            <div id="draft-validation-error-box" class="apply-error-box" role="alert" data-error-code="" hidden>
+              <div>
+                <strong id="draft-validation-error-code">Validation Error</strong>:
+                <span id="draft-validation-error-text"></span>
+              </div>
+            </div>
+
+            <!-- 1. Method / Scheme / Authority / Decoded Path -->
+            <fieldset class="form-fieldset">
+              <legend>Target Endpoint &amp; Human-Readable Decoded Path</legend>
+              <div class="endpoint-grid">
+                <div class="form-group">
+                  <label for="draft-method-select">Method</label>
+                  <select id="draft-method-select" name="method">
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="PUT">PUT</option>
+                    <option value="PATCH">PATCH</option>
+                    <option value="DELETE">DELETE</option>
+                    <option value="HEAD">HEAD</option>
+                    <option value="OPTIONS">OPTIONS</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="draft-scheme-select">Scheme</label>
+                  <select id="draft-scheme-select" name="scheme">
+                    <option value="https">https</option>
+                    <option value="http">http</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="draft-authority-input">Authority / Host</label>
+                  <input
+                    type="text"
+                    id="draft-authority-input"
+                    name="authority"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    placeholder="app-a.local.test:8443"
+                  >
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="draft-decoded-path-input">Human-Readable Decoded Path (auto percent-encoded on wire)</label>
+                <input
+                  type="text"
+                  id="draft-decoded-path-input"
+                  name="decoded_path"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  placeholder="/v1/orders"
+                >
+                <span class="field-hint">Spaces, Unicode (e.g. 日本語), and reserved characters in segments are percent-encoded automatically when saved.</span>
+              </div>
+            </fieldset>
+
+            <!-- 2. Server Wire Preview & Normalization Summary -->
+            <div id="draft-wire-preview-box" class="wire-comparison-box">
+              <h3>Saved Server Wire Preview &amp; Normalization</h3>
+              <dl class="kv-grid">
+                <dt>Wire Request Line</dt>
+                <dd><code id="draft-wire-request-line">-</code></dd>
+                <dt>Wire Full URL</dt>
+                <dd><code id="draft-wire-url">-</code></dd>
+                <dt>Wire Raw Path</dt>
+                <dd><code id="draft-wire-path">-</code></dd>
+                <dt>Wire Raw Query</dt>
+                <dd><code id="draft-wire-query">-</code></dd>
+                <dt>Recalculated Content-Length</dt>
+                <dd><code id="draft-wire-content-length">0</code> bytes</dd>
+                <dt>Excluded Hop-by-Hop Headers</dt>
+                <dd><code id="draft-wire-excluded-headers">-</code></dd>
+                <dt>Method Side-Effect Status</dt>
+                <dd>
+                  <span id="draft-side-effect-badge" class="badge badge-neutral">Safe</span>
+                  <span id="draft-side-effect-text"></span>
+                </dd>
+              </dl>
+            </div>
+
+            <!-- 3. Ordered Query Parameters Editor -->
+            <fieldset id="draft-query-fieldset" class="form-fieldset">
+              <legend>Ordered Query Parameters (Duplicate Keys &amp; Order Preserved)</legend>
+              <p class="field-hint">Enter human-readable decoded keys and values. Reserved characters (&amp;, =, ?, +, spaces, Unicode) are percent-encoded on wire.</p>
+              <div id="draft-query-rows" class="pair-editor-list"></div>
+              <button type="button" id="add-query-pair-btn" class="btn btn-secondary btn-sm">
+                + Add Query Parameter
+              </button>
+            </fieldset>
+
+            <!-- 4. Ordered Request Headers Editor -->
+            <fieldset id="draft-headers-fieldset" class="form-fieldset">
+              <legend>Ordered Request Headers (Duplicate Names &amp; Order Preserved)</legend>
+              <p class="field-hint">Hop-by-hop headers (Connection, Keep-Alive, Transfer-Encoding, etc.) and old Content-Length are stripped automatically on replay.</p>
+              <div id="draft-header-rows" class="pair-editor-list"></div>
+              <button type="button" id="add-header-pair-btn" class="btn btn-secondary btn-sm">
+                + Add Header
+              </button>
+            </fieldset>
+
+            <!-- 5. Ordered Cookies Editor -->
+            <fieldset id="draft-cookies-fieldset" class="form-fieldset">
+              <legend>Cookies Key/Value Editor (Rebuilds Wire Cookie Header)</legend>
+              <div id="draft-cookie-rows" class="pair-editor-list"></div>
+              <button type="button" id="add-cookie-pair-btn" class="btn btn-secondary btn-sm">
+                + Add Cookie
+              </button>
+            </fieldset>
+
+            <!-- 6. Request Body Editor (JSON / URL-Encoded Form / Raw Fallback) -->
+            <fieldset id="draft-body-fieldset" class="form-fieldset">
+              <legend>Request Body Editor</legend>
+              <div class="endpoint-grid">
+                <div class="form-group">
+                  <label for="draft-body-mode-select">Body Mode</label>
+                  <select id="draft-body-mode-select" name="body_mode">
+                    <option value="json">Structured JSON (json)</option>
+                    <option value="urlencoded_form">URL-Encoded Form (urlencoded_form)</option>
+                    <option value="raw_text">Raw Text Fallback (raw_text)</option>
+                    <option value="raw_base64">Raw Base64 (raw_base64)</option>
+                    <option value="empty">Empty Body (empty)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="draft-content-type-input">Content-Type Header</label>
+                  <input
+                    type="text"
+                    id="draft-content-type-input"
+                    name="content_type"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    placeholder="application/json"
+                  >
+                </div>
+              </div>
+
+              <div id="draft-body-parse-notice" class="warn-callout" hidden></div>
+
+              <!-- 6a. JSON Editor Panel -->
+              <div id="draft-body-json-panel" class="body-mode-panel">
+                <div class="json-mutation-bar">
+                  <div class="filter-field">
+                    <label for="draft-json-path-input">Nested JSON Path (dot/index)</label>
+                    <input
+                      type="text"
+                      id="draft-json-path-input"
+                      autocorrect="off"
+                      autocapitalize="off"
+                      spellcheck="false"
+                      placeholder="e.g. user.profile.role or items.1.qty"
+                    >
+                  </div>
+                  <div class="filter-field">
+                    <label for="draft-json-path-val-input">New JSON Value</label>
+                    <input
+                      type="text"
+                      id="draft-json-path-val-input"
+                      autocorrect="off"
+                      autocapitalize="off"
+                      spellcheck="false"
+                      placeholder='e.g. "superadmin" or 99'
+                    >
+                  </div>
+                  <div class="filter-actions">
+                    <button type="button" id="draft-json-path-set-btn" class="btn btn-secondary btn-sm">
+                      Set Nested Field
+                    </button>
+                    <button type="button" id="draft-json-path-remove-btn" class="btn btn-secondary btn-sm">
+                      Remove Field
+                    </button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="draft-json-textarea">JSON Payload</label>
+                  <textarea
+                    id="draft-json-textarea"
+                    rows="7"
+                    spellcheck="false"
+                    class="code-textarea"
+                  ></textarea>
+                  <div class="row-actions" style="margin-block-start: 0.4rem;">
+                    <button type="button" id="draft-json-format-btn" class="btn btn-secondary btn-sm">
+                      Validate &amp; Format JSON
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 6b. URL-Encoded Form Editor Panel -->
+              <div id="draft-body-form-panel" class="body-mode-panel" hidden>
+                <p class="field-hint">Duplicate form keys and exact ordering are preserved and percent-encoded as application/x-www-form-urlencoded.</p>
+                <div id="draft-form-rows" class="pair-editor-list"></div>
+                <button type="button" id="add-form-pair-btn" class="btn btn-secondary btn-sm">
+                  + Add Form Field
+                </button>
+              </div>
+
+              <!-- 6c. Raw Text / Base64 Fallback Panel -->
+              <div id="draft-body-raw-panel" class="body-mode-panel" hidden>
+                <div class="form-group">
+                  <label for="draft-raw-textarea" id="draft-raw-label">Raw Text / Base64 Payload</label>
+                  <textarea
+                    id="draft-raw-textarea"
+                    rows="6"
+                    spellcheck="false"
+                    class="code-textarea"
+                  ></textarea>
+                </div>
+              </div>
+            </fieldset>
+
+            <!-- 7. Replay Execution & Lineage Result -->
+            <div id="draft-replay-panel" class="replay-panel">
+              <div class="replay-action-bar">
+                <div>
+                  <strong>Execute Replay via Local Proxy Chain</strong>
+                  <p class="field-hint">Saves any pending edits to the server first. Non-safe methods (POST/PUT/PATCH/DELETE) require explicit confirmation before sending.</p>
+                </div>
+                <button type="button" id="draft-replay-btn" class="btn btn-primary">
+                  Send Replay Request
+                </button>
+              </div>
+
+              <div id="replay-result-box" class="replay-result-box" data-status="" hidden>
+                <div class="replay-result-header">
+                  <strong>Latest Replay Result:</strong>
+                  <span id="replay-result-status" class="badge badge-success">HTTP 200</span>
+                  <span>New Capture ID: <code id="replay-result-capture-id">-</code></span>
+                  <button type="button" id="replay-view-new-capture-btn" class="btn btn-secondary btn-sm">
+                    Inspect New Capture &amp; Lineage
+                  </button>
+                </div>
+                <div id="replay-result-lineage" class="field-hint"></div>
+                <pre tabindex="0" class="code-preview"><code id="replay-result-body"></code></pre>
+              </div>
+            </div>
+
+            <!-- 8. cURL & Browser fetch() Export Preview -->
+            <div id="draft-export-panel" class="export-panel" data-stale="false">
+              <div class="card-header">
+                <div>
+                  <h3>cURL &amp; Browser fetch() Export</h3>
+                  <p class="card-subtitle">Generated from the latest saved server draft state. Text boxes remain selectable even without Clipboard API permission.</p>
+                </div>
+                <div class="row-actions">
+                  <span id="export-copy-status" class="badge badge-neutral">Ready</span>
+                  <button type="button" id="draft-export-refresh-btn" class="btn btn-secondary btn-sm">
+                    Save &amp; Refresh Export
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <div class="export-label-row">
+                  <label for="export-curl-text">cURL Command</label>
+                  <button type="button" id="copy-curl-btn" class="btn btn-secondary btn-sm">
+                    Copy cURL
+                  </button>
+                </div>
+                <textarea id="export-curl-text" readonly rows="3" spellcheck="false" class="code-textarea"></textarea>
+              </div>
+
+              <div class="form-group">
+                <div class="export-label-row">
+                  <label for="export-curl-edge-text">Local Edge cURL (--resolve &amp; --cacert)</label>
+                  <button type="button" id="copy-curl-edge-btn" class="btn btn-secondary btn-sm">
+                    Copy Local Edge cURL
+                  </button>
+                </div>
+                <textarea id="export-curl-edge-text" readonly rows="3" spellcheck="false" class="code-textarea"></textarea>
+              </div>
+
+              <div class="form-group">
+                <div class="export-label-row">
+                  <label for="export-fetch-text">Browser fetch() JavaScript</label>
+                  <button type="button" id="copy-fetch-btn" class="btn btn-secondary btn-sm">
+                    Copy fetch()
+                  </button>
+                </div>
+                <textarea id="export-fetch-text" readonly rows="5" spellcheck="false" class="code-textarea"></textarea>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
   </main>
 
   <!-- Native Modal Dialog: Copy Route (Requires new non-conflicting domain) -->
@@ -389,6 +1160,35 @@
         </button>
         <button type="submit" id="delete-confirm-btn" class="btn btn-danger" value="delete">
           Delete Route
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Native Modal Dialog: Unsafe Method Replay Confirmation (Rule 7, AC-7) -->
+  <dialog id="replay-confirm-dialog" aria-labelledby="replay-confirm-title">
+    <h2 id="replay-confirm-title">Confirm Non-Safe Request Replay</h2>
+    <p class="dialog-summary">
+      You are about to replay a non-safe HTTP request through the local proxy chain:
+    </p>
+    <dl class="kv-grid">
+      <dt>HTTP Method</dt>
+      <dd><strong id="replay-confirm-method">POST</strong></dd>
+      <dt>Target URL</dt>
+      <dd><code id="replay-confirm-url">-</code></dd>
+      <dt>Draft ID</dt>
+      <dd><code id="replay-confirm-draft-id">-</code></dd>
+    </dl>
+    <p id="replay-confirm-warning" class="warn-callout">
+      HTTP POST/PUT/PATCH/DELETE may mutate state or trigger side effects on the target service.
+    </p>
+    <form id="replay-confirm-form" method="dialog">
+      <div class="dialog-actions">
+        <button type="button" id="replay-confirm-cancel-btn" class="btn btn-secondary" value="cancel" autofocus>
+          Cancel (Do Not Send)
+        </button>
+        <button type="submit" id="replay-confirm-send-btn" class="btn btn-danger" value="confirm">
+          Confirm &amp; Send Replay
         </button>
       </div>
     </form>

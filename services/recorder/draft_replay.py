@@ -128,6 +128,14 @@ def encode_uri_component(val: str) -> str:
     return quote(str(val), safe="-._~")
 
 
+def decode_path_human_readable(raw_path: str) -> str:
+    """Decode a percent-encoded wire URI path into a human-readable path."""
+    s = str(raw_path or "/")
+    if not s.startswith("/"):
+        s = "/" + s
+    return unquote(s)
+
+
 def encode_decoded_path(decoded_path: str) -> str:
     """Encode a human-readable decoded path into a wire-safe URI path preserving '/' separators."""
     s = str(decoded_path or "/")
@@ -1298,24 +1306,6 @@ class DraftReplayManager:
                         headers, "Content-Type", content_type
                     )
 
-            elif "json_mutations" in updates and updates["json_mutations"]:
-                if body_mode != "json" and json_value is None:
-                    raise DraftValidationError(
-                        "Cannot apply structured json_mutations because current draft body is not valid JSON. "
-                        "Provide json_value or edit via raw_text fallback.",
-                        code="not_json_body",
-                        details={"current_body_mode": body_mode, "parse_errors": parse_errors},
-                    )
-                json_value = apply_json_path_mutations(
-                    json_value, updates["json_mutations"]
-                )
-                body_mode = "json"
-                body_text = json.dumps(json_value, ensure_ascii=False)
-                raw_bytes = body_text.encode("utf-8")
-                body_base64 = base64.b64encode(raw_bytes).decode("ascii")
-                form_fields = None
-                parse_errors = []
-
             elif "form_fields" in updates and updates["form_fields"] is not None:
                 if not isinstance(updates["form_fields"], list):
                     raise DraftValidationError(
@@ -1419,6 +1409,37 @@ class DraftReplayManager:
                 json_value = None
                 form_fields = None
                 parse_errors = []
+
+            elif "body_mode" in updates and updates["body_mode"] == "empty":
+                body_mode = "empty"
+                body_text = ""
+                body_base64 = ""
+                json_value = None
+                form_fields = None
+                parse_errors = []
+
+            if "json_mutations" in updates and updates["json_mutations"]:
+                if body_mode != "json" and json_value is None:
+                    raise DraftValidationError(
+                        "Cannot apply structured json_mutations because current draft body is not valid JSON. "
+                        "Provide json_value or edit via raw_text fallback.",
+                        code="not_json_body",
+                        details={"current_body_mode": body_mode, "parse_errors": parse_errors},
+                    )
+                json_value = apply_json_path_mutations(
+                    json_value, updates["json_mutations"]
+                )
+                body_mode = "json"
+                body_text = json.dumps(json_value, ensure_ascii=False)
+                raw_bytes = body_text.encode("utf-8")
+                body_base64 = base64.b64encode(raw_bytes).decode("ascii")
+                form_fields = None
+                parse_errors = []
+                if not content_type or "json" not in content_type.lower():
+                    content_type = "application/json; charset=utf-8"
+                    headers = _ensure_header_ci(
+                        headers, "Content-Type", content_type
+                    )
 
             exp_iso = row["expires_at"]
             if "expires_at" in updates:
@@ -1635,6 +1656,8 @@ class DraftReplayManager:
             "normalized_preview": {
                 "method": norm["method"],
                 "url": norm["url"],
+                "raw_path": norm["raw_path"],
+                "raw_query": norm["raw_query"],
                 "target_uri": norm["target_uri"],
                 "headers": norm["headers"],
                 "excluded_hop_by_hop_headers": norm[
