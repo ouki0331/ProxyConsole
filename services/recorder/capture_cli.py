@@ -1708,7 +1708,7 @@ def main() -> int:
         "rule-copy", help="Copy an existing modification rule"
     )
     p_ru_copy.add_argument("source_rule_id", help="Source rule ID to copy")
-    p_ru_copy.add_argument("--rule-id", default=None)
+    p_ru_copy.add_argument("--rule-id", "--new-rule-id", dest="rule_id", default=None)
     p_ru_copy.add_argument("--name", default=None)
     p_ru_copy.add_argument("--description", default=None)
     p_ru_copy.add_argument("--enabled", default=None)

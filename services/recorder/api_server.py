@@ -940,6 +940,7 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                     rule_ids=body.get("rule_ids"),
                     include_disabled=include_disabled,
                     candidate_rule=body.get("candidate_rule"),
+                    rules=body.get("rules"),
                 )
                 self._send_json(200, res)
                 return
@@ -962,6 +963,7 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                     rule_ids=body.get("rule_ids"),
                     include_disabled=include_disabled,
                     candidate_rule=body.get("candidate_rule"),
+                    rules=body.get("rules"),
                 )
                 self._send_json(200, res)
                 return

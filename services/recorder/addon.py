@@ -148,7 +148,7 @@ class CaptureRecorderAddon:
             )
             flow.metadata["pc_rule_evaluation"] = rule_res["evaluation"]
 
-            if rule_res["modified"] and not is_websocket and not is_streamed:
+            if rule_res["modified"]:
                 req.path = rule_res["raw_target"]
                 req.raw_content = rule_res["body_bytes"]
                 req.headers.fields = tuple(

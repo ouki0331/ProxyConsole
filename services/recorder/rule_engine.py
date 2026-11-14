@@ -656,9 +656,7 @@ def evaluate_rule_match(
     raw_path: str,
     decoded_path: str,
     query_params: list[list[str]],
-    orig_query_params: list[list[str]],
     headers: list[list[str]],
-    orig_headers: list[list[str]],
     content_type: str | None,
 ) -> bool:
     if not match_spec:
@@ -705,18 +703,12 @@ def evaluate_rule_match(
 
     if "query_pairs" in match_spec:
         for qm in match_spec["query_pairs"]:
-            if not (
-                _match_pair_list(qm, query_params, case_insensitive_name=False)
-                or _match_pair_list(qm, orig_query_params, case_insensitive_name=False)
-            ):
+            if not _match_pair_list(qm, query_params, case_insensitive_name=False):
                 return False
 
     if "header_pairs" in match_spec:
         for hm in match_spec["header_pairs"]:
-            if not (
-                _match_pair_list(hm, headers, case_insensitive_name=True)
-                or _match_pair_list(hm, orig_headers, case_insensitive_name=True)
-            ):
+            if not _match_pair_list(hm, headers, case_insensitive_name=True):
                 return False
 
     if "content_types" in match_spec:
@@ -736,6 +728,17 @@ def _get_header_ci(headers: list[list[str]], name: str) -> str | None:
     return None
 
 
+def _extract_connection_tokens(headers: list[list[str]]) -> set[str]:
+    connection_tokens: set[str] = set()
+    for k, v in headers:
+        if k.lower() == "connection":
+            for tok in v.split(","):
+                tc = tok.strip().lower()
+                if tc:
+                    connection_tokens.add(tc)
+    return connection_tokens
+
+
 def _strip_hop_by_hop_and_rebuild_headers(
     headers: list[list[str]],
     *,
@@ -746,13 +749,7 @@ def _strip_hop_by_hop_and_rebuild_headers(
     if is_websocket:
         return [list(p) for p in headers], []
 
-    connection_tokens: set[str] = set()
-    for k, v in headers:
-        if k.lower() == "connection":
-            for tok in v.split(","):
-                tc = tok.strip().lower()
-                if tc:
-                    connection_tokens.add(tc)
+    connection_tokens = _extract_connection_tokens(headers)
 
     excluded: list[list[str]] = []
     filtered: list[list[str]] = [["Host", authority]]
@@ -1197,6 +1194,7 @@ class RuleEngineManager:
         work_cookies = copy.deepcopy(orig_cookies)
         work_body_bytes = orig_body_bytes
         work_content_type = orig_content_type
+        connection_tokens = _extract_connection_tokens(orig_headers)
 
         matched_rule_ids: list[str] = []
         applied_rule_ids: list[str] = []
@@ -1204,6 +1202,7 @@ class RuleEngineManager:
         failed_rule_ids: list[str] = []
         rule_reports: list[dict[str, Any]] = []
         all_changes: list[dict[str, Any]] = []
+        skipped_hop_headers: list[list[str]] = []
 
         for rule in candidate_rules:
             rid = rule["rule_id"]
@@ -1220,9 +1219,7 @@ class RuleEngineManager:
                 raw_path=raw_path or "/",
                 decoded_path=decoded_path,
                 query_params=cur_query_params,
-                orig_query_params=orig_query_params,
                 headers=work_headers,
-                orig_headers=orig_headers,
                 content_type=work_content_type,
             )
             if not is_match:
@@ -1242,10 +1239,36 @@ class RuleEngineManager:
                         "outcome": "skipped",
                         "reason": "websocket_handshake",
                         "changes": [],
+                        "skipped_actions": [],
                         "errors": [
                             {
+                                "code": "websocket_handshake",
                                 "reason": "websocket_handshake",
                                 "message": "WebSocket handshake requests are protected and skipped by modification rules.",
+                            }
+                        ],
+                    }
+                )
+                continue
+
+            # Streamed requests (oversized > max_body_bytes or chunked) are passed through without modification
+            if is_streamed:
+                skipped_rule_ids.append(rid)
+                rule_reports.append(
+                    {
+                        "rule_id": rid,
+                        "name": rule["name"],
+                        "priority": rule["priority"],
+                        "matched": True,
+                        "outcome": "skipped",
+                        "reason": "streamed_request",
+                        "changes": [],
+                        "skipped_actions": [],
+                        "errors": [
+                            {
+                                "code": "streamed_request",
+                                "reason": "streamed_request",
+                                "message": "Streamed requests are passed through without modification and skipped by modification rules.",
                             }
                         ],
                     }
@@ -1263,6 +1286,7 @@ class RuleEngineManager:
             rule_changes: list[dict[str, Any]] = []
             rule_errors: list[dict[str, Any]] = []
             rule_skipped_reasons: list[str] = []
+            rule_skipped_actions: list[dict[str, Any]] = []
             rule_failed = False
 
             for act in rule["actions"]:
@@ -1292,6 +1316,36 @@ class RuleEngineManager:
                         )
 
                     elif target == "header":
+                        hdr_name = str(act.get("name") or "").strip()
+                        if not hdr_name and act.get("index") is not None:
+                            idx_candidate = int(act["index"])
+                            if 0 <= idx_candidate < len(work_headers):
+                                hdr_name = str(work_headers[idx_candidate][0]).strip()
+                        hdr_name_l = hdr_name.lower()
+                        if (
+                            hdr_name_l in ("host", "content-length")
+                            or hdr_name_l in HOP_BY_HOP_HEADERS
+                            or hdr_name_l in connection_tokens
+                        ):
+                            if hdr_name_l in HOP_BY_HOP_HEADERS or hdr_name_l in connection_tokens:
+                                skipped_hop_headers.append(
+                                    [hdr_name or str(act.get("name") or ""), str(act.get("value") or "")]
+                                )
+                            rule_skipped_reasons.append("protected_header")
+                            rule_skipped_actions.append(
+                                {
+                                    "rule_id": rid,
+                                    "target": "header",
+                                    "op": op,
+                                    "field": hdr_name or act.get("name", ""),
+                                    "index": act.get("index"),
+                                    "value": act.get("value"),
+                                    "reason": "protected_header",
+                                    "message": f"Header {hdr_name!r} is a protected authority, Content-Length, or hop-by-hop header and cannot be modified.",
+                                }
+                            )
+                            continue
+
                         work_headers = apply_pair_mutations(
                             work_headers,
                             [act],
@@ -1560,6 +1614,7 @@ class RuleEngineManager:
                         "outcome": "failed",
                         "reason": rule_errors[0]["reason"] if rule_errors else "action_failed",
                         "changes": [],
+                        "skipped_actions": rule_skipped_actions,
                         "errors": rule_errors,
                     }
                 )
@@ -1575,6 +1630,7 @@ class RuleEngineManager:
                         "outcome": "applied",
                         "reason": None,
                         "changes": rule_changes,
+                        "skipped_actions": rule_skipped_actions,
                         "errors": [],
                     }
                 )
@@ -1594,13 +1650,24 @@ class RuleEngineManager:
                         "outcome": "skipped",
                         "reason": skip_reason,
                         "changes": [],
-                        "errors": [],
+                        "skipped_actions": rule_skipped_actions,
+                        "errors": [
+                            {
+                                "code": skip_reason,
+                                "reason": skip_reason,
+                                "message": (
+                                    rule_skipped_actions[0]["message"]
+                                    if rule_skipped_actions
+                                    else f"Rule skipped: {skip_reason}"
+                                ),
+                            }
+                        ],
                     }
                 )
 
         modified = len(applied_rule_ids) > 0
         if modified:
-            normalized_headers, excluded_hop_headers = (
+            normalized_headers, stripped_hop_headers = (
                 _strip_hop_by_hop_and_rebuild_headers(
                     work_headers,
                     authority=authority,
@@ -1608,9 +1675,10 @@ class RuleEngineManager:
                     is_websocket=is_websocket,
                 )
             )
+            excluded_hop_headers = stripped_hop_headers + skipped_hop_headers
         else:
             normalized_headers = orig_headers
-            excluded_hop_headers = []
+            excluded_hop_headers = skipped_hop_headers
 
         final_raw_path = raw_path or "/"
         final_raw_target = (
@@ -1697,6 +1765,7 @@ class RuleEngineManager:
         rule_ids: list[str] | None = None,
         include_disabled: bool | None = None,
         candidate_rule: dict[str, Any] | None = None,
+        rules: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Dry-run preview against either a stored capture (`capture_id`) or an inline `request`
         without sending traffic to any target or creating captures (Rule 3, AC-11).
@@ -1714,6 +1783,8 @@ class RuleEngineManager:
                 payload["include_disabled"] = include_disabled
             if candidate_rule is not None:
                 payload["candidate_rule"] = candidate_rule
+            if rules is not None:
+                payload["rules"] = rules
         elif not isinstance(payload, dict):
             raise RuleValidationError("Preview payload must be a JSON object")
 
@@ -1733,6 +1804,10 @@ class RuleEngineManager:
             raw_query = str(req.get("raw_query") or "")
             headers = [[str(k), str(v)] for k, v in (req.get("headers") or [])]
             is_websocket = bool(detail.get("is_websocket"))
+            is_streamed = bool(
+                not is_websocket
+                and detail.get("capture_status") in ("truncated", "metadata-only")
+            )
             body_meta = req.get("body") or {}
             blob_ref = body_meta.get("blob_ref")
             raw_body = b""
@@ -1782,6 +1857,7 @@ class RuleEngineManager:
                 headers.append(["Content-Type", str(ct_in)])
 
             is_websocket = bool(req_in.get("is_websocket", False))
+            is_streamed = bool(req_in.get("is_streamed", False))
             if "json_value" in req_in and req_in["json_value"] is not None:
                 raw_body = json.dumps(
                     req_in["json_value"], ensure_ascii=False

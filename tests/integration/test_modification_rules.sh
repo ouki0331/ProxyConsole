@@ -201,17 +201,18 @@ json_echo="$(curl -fsS -D "${json_hdr}" \
   -H "X-Multi: two" \
   -H "X-Multi: three" \
   -H "Cookie: sid=s100; theme=light; lang=ja" \
-  -H "Connection: keep-alive, X-Custom-Hop" \
-  -H "X-Custom-Hop: drop-me" \
+  -H "Keep-Alive: timeout=5" \
   --data-raw '{"user":{"profile":{"name":"Alice","role":"viewer"}},"items":[{"id":1,"qty":2},{"id":2,"qty":5}]}' \
   "https://app-a.local.test:${EDGE_HTTPS_PORT}/v1/orders/create?tag=alpha&tag=beta&tag=gamma&env=prod-1&jp=%E6%97%A5%E6%9C%AC")"
 
 json_cap_id="$(awk 'tolower($1)=="x-capture-id:" {gsub(/\r/,"",$2); print $2}' "${json_hdr}")"
 rm -f "${json_hdr}"
+json_cap_detail="$(curl -fsS "${API_BASE}/api/v1/captures/${json_cap_id}")"
 
-JSON_ECHO="${json_echo}" python3 - <<'PY'
+JSON_ECHO="${json_echo}" JSON_DET="${json_cap_detail}" python3 - <<'PY'
 import json, os
 echo = json.loads(os.environ["JSON_ECHO"])
+det = json.loads(os.environ["JSON_DET"])
 assert echo["target"] == "echo-a", echo
 assert echo["method"] == "POST", echo
 assert echo["path"] == "/v1/orders/create", echo
@@ -231,8 +232,15 @@ x_multi = [v for k, v in hdr_pairs if k.lower() == "x-multi"]
 assert x_multi == ["two-mod", "three", "four"], x_multi
 cookies = [v for k, v in hdr_pairs if k.lower() == "cookie"]
 assert cookies == ["sid=s100; theme=dark; debug=1"], cookies
-hop_hdrs = [v for k, v in hdr_pairs if k.lower() in ("x-custom-hop", "transfer-encoding", "keep-alive")]
+hop_hdrs = [v for k, v in hdr_pairs if k.lower() in ("transfer-encoding", "keep-alive")]
 assert hop_hdrs == [], hop_hdrs
+
+reval = det["rule_evaluation"]
+chg_fields = [c["field"].lower() for c in reval["change_summary"] if c["target"] == "header"]
+assert "connection" not in chg_fields and "keep-alive" not in chg_fields and "transfer-encoding" not in chg_fields, chg_fields
+assert len(reval["rules"][0]["skipped_actions"]) == 3, reval["rules"][0]
+excl_hop = [k.lower() for k, _ in reval["after_summary"]["excluded_hop_by_hop_headers"]]
+assert "keep-alive" in excl_hop, reval["after_summary"]["excluded_hop_by_hop_headers"]
 
 assert echo["body_json"] == {
     "user": {"profile": {"name": "Alice", "role": "admin", "region": "日本"}},
@@ -346,6 +354,99 @@ assert echo["body_json"] == {"chain": {"step1": "done", "step2_saw_step1": True}
 reval = det["rule_evaluation"]
 assert reval["applied_rule_ids"] == ["rule:chain-early", "rule:chain-late"], reval
 assert reval["rule_modified"] is True and reval["outcome"] == "applied", reval
+PY
+
+# 5b. Reverse rule chain regression: subsequent rule must match working state only, NOT original state before prior rule (Review 001 Finding 1)
+curl -fsS -X POST "${API_BASE}/api/v1/rules" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rule_id": "rule:rev-1",
+    "name": "Reverse Chain 1 (Mutates old -> new)",
+    "priority": 10,
+    "match": {
+      "domain": "app-a.local.test",
+      "path_exact": "/v1/reverse-chain",
+      "query_pairs": [{"name": "stage", "value": "old"}],
+      "header_pairs": [{"name": "X-Stage", "value": "old"}]
+    },
+    "actions": [
+      {"target": "query", "op": "set", "name": "stage", "value": "new"},
+      {"target": "header", "op": "set", "name": "X-Stage", "value": "new"}
+    ]
+  }' >/dev/null
+
+curl -fsS -X POST "${API_BASE}/api/v1/rules" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rule_id": "rule:rev-2-stale",
+    "name": "Reverse Chain 2 (Should NOT match original old after rev-1)",
+    "priority": 20,
+    "match": {
+      "domain": "app-a.local.test",
+      "path_exact": "/v1/reverse-chain",
+      "query_pairs": [{"name": "stage", "value": "old"}]
+    },
+    "actions": [
+      {"target": "header", "op": "set", "name": "X-Stale-Matched", "value": "bug"}
+    ]
+  }' >/dev/null
+
+curl -fsS -X POST "${API_BASE}/api/v1/rules" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rule_id": "rule:rev-3-stale-hdr",
+    "name": "Reverse Chain 3 (Should NOT match original X-Stage: old after rev-1)",
+    "priority": 25,
+    "match": {
+      "domain": "app-a.local.test",
+      "path_exact": "/v1/reverse-chain",
+      "header_pairs": [{"name": "X-Stage", "value": "old"}]
+    },
+    "actions": [
+      {"target": "header", "op": "set", "name": "X-Stale-Hdr-Matched", "value": "bug"}
+    ]
+  }' >/dev/null
+
+curl -fsS -X POST "${API_BASE}/api/v1/rules" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rule_id": "rule:rev-4-working",
+    "name": "Reverse Chain 4 (Matches working state new)",
+    "priority": 30,
+    "match": {
+      "domain": "app-a.local.test",
+      "path_exact": "/v1/reverse-chain",
+      "query_pairs": [{"name": "stage", "value": "new"}],
+      "header_pairs": [{"name": "X-Stage", "value": "new"}]
+    },
+    "actions": [
+      {"target": "header", "op": "set", "name": "X-Chain-Verified", "value": "ok"}
+    ]
+  }' >/dev/null
+
+rev_hdr="/tmp/pc_dev040_rev_hdr.txt"
+rev_echo="$(curl -fsS -D "${rev_hdr}" \
+  --cacert "${CACERT}" \
+  --resolve "app-a.local.test:${EDGE_HTTPS_PORT}:127.0.0.1" \
+  -H "X-Stage: old" \
+  "https://app-a.local.test:${EDGE_HTTPS_PORT}/v1/reverse-chain?stage=old")"
+rev_cap_id="$(awk 'tolower($1)=="x-capture-id:" {gsub(/\r/,"",$2); print $2}' "${rev_hdr}")"
+rm -f "${rev_hdr}"
+rev_detail="$(curl -fsS "${API_BASE}/api/v1/captures/${rev_cap_id}")"
+
+REV_ECHO="${rev_echo}" REV_DET="${rev_detail}" python3 - <<'PY'
+import json, os
+recho = json.loads(os.environ["REV_ECHO"])
+rdet = json.loads(os.environ["REV_DET"])
+rhdrs = {k.lower(): v for k, v in recho["headers"]}
+assert recho["query_params"] == [["stage", "new"]], recho["query_params"]
+assert rhdrs.get("x-stage") == "new", recho["headers"]
+assert rhdrs.get("x-chain-verified") == "ok", recho["headers"]
+assert "x-stale-matched" not in rhdrs, recho["headers"]
+assert "x-stale-hdr-matched" not in rhdrs, recho["headers"]
+reval = rdet["rule_evaluation"]
+assert reval["matched_rule_ids"] == ["rule:rev-1", "rule:rev-4-working"], reval
+assert reval["applied_rule_ids"] == ["rule:rev-1", "rule:rev-4-working"], reval
 PY
 
 echo "==> [6/10] Verifying disabled rules and non-matching requests are untouched (AC-8, Rule 2)"
@@ -500,7 +601,7 @@ assert p_cli["rule_evaluation"]["applied_rule_ids"] == ["rule:chain-early"], p_c
 assert json.loads(p_cli["modified_request"]["body_text"]) == {"chain": {"step1": "done"}}, p_cli
 PY
 
-echo "==> [9/10] Verifying WebSocket handshake & multipart/form-data protection (AC-14)"
+echo "==> [9/10] Verifying WebSocket handshake, multipart/form-data, streamed request & protected-header-only rule (AC-12, AC-13, AC-14, Review 001 Findings 2 & 3)"
 curl -fsS -X POST "${API_BASE}/api/v1/rules" \
   -H "Content-Type: application/json" \
   -d '{
@@ -592,14 +693,112 @@ print(ws_capture_id)
 PY
 )"
 
+# 9c. Streamed request (> 1 MiB CAPTURE_MAX_BODY_BYTES) matching rule with non-body & body actions -> skipped consistently (Review 001 Finding 2)
+curl -fsS -X POST "${API_BASE}/api/v1/rules" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rule_id": "rule:streamed-nonbody",
+    "name": "Streamed Request Non-Body Rule",
+    "priority": 5,
+    "match": {
+      "domain": "app-a.local.test",
+      "path_exact": "/v1/streamed-test"
+    },
+    "actions": [
+      {"target": "query", "op": "set", "name": "q", "value": "should-not-apply"},
+      {"target": "header", "op": "set", "name": "X-Stream-Mut", "value": "should-not-apply"},
+      {"target": "cookie", "op": "set", "name": "sid", "value": "should-not-apply"}
+    ]
+  }' >/dev/null
+
+stream_body_file="/tmp/pc_dev040_stream_body.bin"
+python3 -c 'from pathlib import Path; Path("/tmp/pc_dev040_stream_body.bin").write_bytes(b"S" * (1024 * 1024 + 65536))'
+stream_hdr="/tmp/pc_dev040_stream_hdr.txt"
+stream_echo="$(curl -fsS -D "${stream_hdr}" \
+  --cacert "${CACERT}" \
+  --resolve "app-a.local.test:${EDGE_HTTPS_PORT}:127.0.0.1" \
+  -X POST \
+  -H "Content-Type: application/octet-stream" \
+  -H "X-Stream-Orig: keep-me" \
+  --data-binary "@${stream_body_file}" \
+  "https://app-a.local.test:${EDGE_HTTPS_PORT}/v1/streamed-test?q=orig")"
+stream_cap_id="$(awk 'tolower($1)=="x-capture-id:" {gsub(/\r/,"",$2); print $2}' "${stream_hdr}")"
+rm -f "${stream_hdr}" "${stream_body_file}"
+
+# 9d. Rule that ONLY manipulates protected headers (Host, Content-Length, hop-by-hop, Connection-token) -> skipped, modified=False, change_summary=[] (Review 001 Finding 3)
+curl -fsS -X POST "${API_BASE}/api/v1/rules" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rule_id": "rule:protected-only",
+    "name": "Protected Headers Only Rule",
+    "priority": 5,
+    "match": {
+      "domain": "app-a.local.test",
+      "path_exact": "/v1/protected-only"
+    },
+    "actions": [
+      {"target": "header", "op": "set", "name": "Host", "value": "evil.local.test"},
+      {"target": "header", "op": "set", "name": "Content-Length", "value": "99999"},
+      {"target": "header", "op": "add", "name": "Keep-Alive", "value": "timeout=10"},
+      {"target": "header", "op": "add", "name": "Transfer-Encoding", "value": "chunked"},
+      {"target": "header", "op": "add", "name": "Connection", "value": "keep-alive"}
+    ]
+  }' >/dev/null
+
+prot_hdr="/tmp/pc_dev040_prot_hdr.txt"
+prot_echo="$(curl -fsS -D "${prot_hdr}" \
+  --cacert "${CACERT}" \
+  --resolve "app-a.local.test:${EDGE_HTTPS_PORT}:127.0.0.1" \
+  -X POST \
+  -H "Content-Type: text/plain" \
+  --data-raw "hello-protected" \
+  "https://app-a.local.test:${EDGE_HTTPS_PORT}/v1/protected-only")"
+prot_cap_id="$(awk 'tolower($1)=="x-capture-id:" {gsub(/\r/,"",$2); print $2}' "${prot_hdr}")"
+rm -f "${prot_hdr}"
+
+prot_preview="$(curl -fsS -X POST "${API_BASE}/api/v1/rules/preview" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request": {
+      "method": "POST",
+      "authority": "app-a.local.test:8443",
+      "path": "/v1/protected-only",
+      "headers": [
+        ["Connection", "keep-alive, X-Hop-Token"],
+        ["X-Hop-Token", "initial"]
+      ],
+      "body_text": "hello-protected"
+    },
+    "rules": [
+      {
+        "rule_id": "rule:preview-prot-token",
+        "priority": 1,
+        "match": {"path_exact": "/v1/protected-only"},
+        "actions": [
+          {"target": "header", "op": "set", "name": "Host", "value": "evil.local.test"},
+          {"target": "header", "op": "set", "name": "X-Hop-Token", "value": "mutated-hop"}
+        ]
+      }
+    ]
+  }')"
+
 mp_detail="$(curl -fsS "${API_BASE}/api/v1/captures/${mp_cap_id}")"
 ws_detail="$(curl -fsS "${API_BASE}/api/v1/captures/${ws_cap_id}")"
+stream_detail="$(curl -fsS "${API_BASE}/api/v1/captures/${stream_cap_id}")"
+prot_detail="$(curl -fsS "${API_BASE}/api/v1/captures/${prot_cap_id}")"
 
-MP_ECHO="${mp_echo}" MP_DET="${mp_detail}" WS_DET="${ws_detail}" python3 - <<'PY'
+MP_ECHO="${mp_echo}" MP_DET="${mp_detail}" WS_DET="${ws_detail}" \
+ST_ECHO="${stream_echo}" ST_DET="${stream_detail}" \
+PR_ECHO="${prot_echo}" PR_DET="${prot_detail}" PR_PREV="${prot_preview}" python3 - <<'PY'
 import json, os
 me = json.loads(os.environ["MP_ECHO"])
 md = json.loads(os.environ["MP_DET"])
 wd = json.loads(os.environ["WS_DET"])
+se = json.loads(os.environ["ST_ECHO"])
+sd = json.loads(os.environ["ST_DET"])
+pe = json.loads(os.environ["PR_ECHO"])
+pd = json.loads(os.environ["PR_DET"])
+pp = json.loads(os.environ["PR_PREV"])
 
 assert "form-data; name=\"field1\"" in me["body_text"], me["body_text"]
 assert md["rule_evaluation"]["rule_failed"] is True, md["rule_evaluation"]
@@ -608,6 +807,42 @@ assert md["rule_evaluation"]["rules"][0]["errors"][0]["code"] == "unsupported_bo
 assert wd["is_websocket"] is True, wd
 assert wd["rule_evaluation"]["outcome"] == "skipped_websocket", wd["rule_evaluation"]
 assert wd["rule_evaluation"]["skipped_rule_ids"] == ["rule:broad-app-a"], wd["rule_evaluation"]
+
+# Streamed request assertions: target receives unmodified query/headers/body, metadata shows skipped & modified=False
+assert se["raw_query"] == "q=orig", se
+se_hdrs = {k.lower(): v for k, v in se["headers"]}
+assert se_hdrs.get("x-stream-orig") == "keep-me", se["headers"]
+assert "x-stream-mut" not in se_hdrs, se["headers"]
+assert se["body_size"] == 1024 * 1024 + 65536, se["body_size"]
+s_eval = sd["rule_evaluation"]
+assert s_eval["modified"] is False and s_eval["rule_modified"] is False, s_eval
+assert s_eval["outcome"] == "skipped", s_eval
+assert s_eval["matched_rule_ids"] == ["rule:streamed-nonbody"], s_eval
+assert s_eval["applied_rule_ids"] == [], s_eval
+assert s_eval["skipped_rule_ids"] == ["rule:streamed-nonbody"], s_eval
+assert s_eval["change_summary"] == [] and s_eval["change_count"] == 0, s_eval
+assert s_eval["rules"][0]["reason"] == "streamed_request", s_eval
+
+# Protected-header-only rule assertions: target receives original Host & Content-Length, metadata shows skipped & modified=False
+pe_hdrs = {k.lower(): v for k, v in pe["headers"]}
+assert pe["host"] == "app-a.local.test:8443", pe
+assert pe_hdrs.get("content-length") == str(len("hello-protected")), pe["headers"]
+p_eval = pd["rule_evaluation"]
+assert p_eval["modified"] is False and p_eval["rule_modified"] is False, p_eval
+assert p_eval["outcome"] == "skipped", p_eval
+assert p_eval["matched_rule_ids"] == ["rule:protected-only"], p_eval
+assert p_eval["applied_rule_ids"] == [], p_eval
+assert p_eval["skipped_rule_ids"] == ["rule:protected-only"], p_eval
+assert p_eval["change_summary"] == [] and p_eval["change_count"] == 0, p_eval
+assert p_eval["rules"][0]["reason"] == "protected_header", p_eval
+assert len(p_eval["rules"][0]["skipped_actions"]) == 5, p_eval
+
+# Preview assertions for Connection-nominated token + Host
+assert pp["modified"] is False and pp["outcome"] == "skipped", pp
+assert pp["applied_rule_ids"] == [], pp
+assert pp["skipped_rule_ids"] == ["rule:preview-prot-token"], pp
+assert pp["change_summary"] == [], pp
+assert pp["rules"][0]["reason"] == "protected_header", pp
 PY
 
 echo "==> [10/10] Verifying capture search filters & index rebuild preservation for rules (AC-13, Rule 10)"
