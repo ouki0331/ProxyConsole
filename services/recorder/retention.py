@@ -206,6 +206,7 @@ class RetentionEngine:
     def get_storage_usage(self, *, ensure_db: bool = True) -> dict[str, Any]:
         if ensure_db:
             self.store.ensure_schema()
+        self.checkpoint_wal()
 
         captures_files = (
             sorted(self.store.captures_dir.glob("*.json"))

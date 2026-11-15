@@ -1210,11 +1210,21 @@ class NotificationEngineManager:
                             message=f"Target container '{up_host}' is stopped for {r_id} ({r_domain})",
                         )
                 elif t_state == "running":
-                    self.resolve_open_incidents(
-                        route_id=r_id,
-                        event_types=("container_unavailable",),
-                        recovery_reason=f"target_container_running_{up_host}",
-                    )
+                    with self.store._connect() as conn:
+                        open_unavail = conn.execute(
+                            """
+                            SELECT incident_id FROM notification_incidents
+                            WHERE route_id = ? AND event_type = 'container_unavailable' AND status = 'open'
+                            LIMIT 1
+                            """,
+                            (r_id,),
+                        ).fetchone()
+                    if open_unavail is not None:
+                        self.resolve_open_incidents(
+                            route_id=r_id,
+                            event_types=("container_unavailable",),
+                            recovery_reason=f"target_container_running_{up_host}",
+                        )
         except Exception:
             pass
 
@@ -1457,8 +1467,20 @@ class NotificationEngineManager:
         if since_seq is None:
             # Return chronological ascending or keep descending? Let's keep ascending by seq for cursor consistency!
             items.sort(key=lambda x: int(x["seq"]))
+        next_since_seq = (
+            int(items[-1]["seq"])
+            if items
+            else (int(since_seq) if since_seq is not None else 0)
+        )
+        has_more = bool(
+            since_seq is not None
+            and len(items) == safe_limit
+            and next_since_seq < latest_seq
+        )
         return {
             "latest_seq": latest_seq,
+            "next_since_seq": next_since_seq,
+            "has_more": has_more,
             "total": len(items),
             "items": items,
         }

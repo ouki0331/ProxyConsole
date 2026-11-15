@@ -692,28 +692,45 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.flush()
 
+        def _send_ws_sync_pages(start_seq: int) -> int:
+            cursor = max(0, int(start_seq))
+            sent_any = False
+            while True:
+                page = self.store.notifications.list_events(
+                    since_seq=cursor, limit=500
+                )
+                page_items = page["items"]
+                latest_seq_val = int(page["latest_seq"])
+                next_cursor = (
+                    max(cursor, int(page_items[-1]["seq"]))
+                    if page_items
+                    else cursor
+                )
+                has_more_val = bool(page.get("has_more"))
+                sync_payload = json.dumps(
+                    {
+                        "type": "sync",
+                        "since_seq": cursor,
+                        "next_since_seq": next_cursor,
+                        "latest_seq": latest_seq_val,
+                        "has_more": has_more_val,
+                        "events": page_items,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                self.wfile.write(_build_ws_frame(0x1, sync_payload))
+                self.wfile.flush()
+                sent_any = True
+                cursor = next_cursor
+                if not page_items or not has_more_val:
+                    break
+            return cursor
+
         try:
-            # Send initial sync frame with any missed events since client_seq
-            missed = self.store.notifications.list_events(
-                since_seq=client_seq, limit=500
-            )
-            latest_seq = int(missed["latest_seq"])
-            sync_payload = json.dumps(
-                {
-                    "type": "sync",
-                    "since_seq": client_seq,
-                    "latest_seq": latest_seq,
-                    "events": missed["items"],
-                },
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ).encode("utf-8")
-            self.wfile.write(_build_ws_frame(0x1, sync_payload))
-            self.wfile.flush()
-            if missed["items"]:
-                client_seq = max(client_seq, int(missed["items"][-1]["seq"]))
-            else:
-                client_seq = max(client_seq, latest_seq)
+            # Send initial sync frame(s) with any missed events since client_seq,
+            # advancing client_seq ONLY to the last actually delivered event seq
+            client_seq = _send_ws_sync_pages(client_seq)
 
             while True:
                 # Check if failure simulation or explicit drop was requested
@@ -766,32 +783,17 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                         try:
                             cmd = json.loads(payload.decode("utf-8", errors="replace"))
                             if isinstance(cmd, dict):
-                                if cmd.get("action") == "ping":
+                                act = cmd.get("action") or cmd.get("type")
+                                if act == "ping":
                                     pong_bytes = json.dumps(
                                         {"type": "pong", "latest_seq": client_seq}
                                     ).encode("utf-8")
                                     self.wfile.write(_build_ws_frame(0x1, pong_bytes))
                                     self.wfile.flush()
-                                elif cmd.get("action") == "resync":
+                                elif act == "resync":
                                     req_seq = int(cmd.get("since_seq", 0))
-                                    resync_data = self.store.notifications.list_events(
-                                        since_seq=req_seq, limit=500
-                                    )
-                                    resync_bytes = json.dumps(
-                                        {
-                                            "type": "sync",
-                                            "since_seq": req_seq,
-                                            "latest_seq": resync_data["latest_seq"],
-                                            "events": resync_data["items"],
-                                        },
-                                        ensure_ascii=False,
-                                        separators=(",", ":"),
-                                    ).encode("utf-8")
-                                    self.wfile.write(_build_ws_frame(0x1, resync_bytes))
-                                    self.wfile.flush()
-                                    client_seq = max(
-                                        client_seq, int(resync_data["latest_seq"])
-                                    )
+                                    delivered_seq = _send_ws_sync_pages(req_seq)
+                                    client_seq = max(client_seq, delivered_seq)
                         except Exception:
                             pass
         except (BrokenPipeError, ConnectionResetError, OSError):

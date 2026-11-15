@@ -485,6 +485,25 @@ class CaptureIndexStore:
             conn.close()
 
     def ensure_schema(self) -> None:
+        if self.db_path.is_file():
+            try:
+                with self._connect() as conn:
+                    mig_row = conn.execute(
+                        "SELECT COUNT(*) AS cnt FROM schema_migrations WHERE version IN (1, 2, 3, 4, 5, 6, 7)"
+                    ).fetchone()
+                    st_row = conn.execute(
+                        "SELECT seeded FROM route_apply_state WHERE id = 1"
+                    ).fetchone()
+                    if (
+                        mig_row is not None
+                        and int(mig_row["cnt"]) == 7
+                        and st_row is not None
+                        and int(st_row["seeded"]) == 1
+                    ):
+                        return
+            except Exception:
+                pass
+
         sql_text_001 = DEFAULT_MIGRATION_SQL
         if self.migration_path.is_file():
             sql_text_001 = self.migration_path.read_text(encoding="utf-8")
@@ -697,6 +716,7 @@ class CaptureIndexStore:
                     "UPDATE route_apply_state SET seeded = 1 WHERE id = 1"
                 )
             conn.commit()
+        self.retention.checkpoint_wal()
 
     def _extract_row_params(
         self, record: dict[str, Any], record_file: str

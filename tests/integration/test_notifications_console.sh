@@ -798,6 +798,142 @@ try:
     assert resync_state["countAfterDup"] == 2, f"Duplicate delivery must NOT double-increment count: {resync_state}"
     assert resync_state["sentAfterDup"] == resync_state["sentBeforeDup"], f"Duplicate delivery must NOT re-send browser notification: {resync_state}"
 
+    # 3b) Regression test for multi-page backlog resync (>200 events over REST and >500 events over WebSocket):
+    # Ensure cursor never skips unconsumed events when latest_seq exceeds single-page limit (AC-9, AC-10)
+    seq_before_bulk = cdp.eval_js("return window.__pcNotificationsState.latestSeq;")
+    # Disconnect browser WebSocket and cancel auto-reconnect timer while seeding >200 events (235 events)
+    cdp.eval_js("window.__pcNotificationsState.disconnectWsForTest();")
+    bulk_rest_count = 235
+    bulk_rest_last_ev = None
+    for _ in range(bulk_rest_count):
+        bulk_rest_last_ev = api_post(
+            "/api/v1/notifications/ingest",
+            {
+                "event_type": "http_500",
+                "route_id": "route:app-a",
+                "domain": "app-a.local.test",
+                "reason": "HTTP 500 on /v1/bulk-rest-backlog",
+            },
+        )["event"]
+    bulk_rest_inc_id = bulk_rest_last_ev["incident_id"]
+    bulk_rest_target_seq = int(bulk_rest_last_ev["seq"])
+    assert bulk_rest_target_seq >= seq_before_bulk + bulk_rest_count, (
+        seq_before_bulk,
+        bulk_rest_target_seq,
+    )
+
+    # First verify 1-page REST resync (maxPages=1) advances cursor ONLY to the 200th event's seq, NOT to latest_seq
+    one_page_res = cdp.eval_js(
+        "return window.__pcNotificationsState.resyncViaRest({ triggerLiveAlerts: false, maxPages: 1 });"
+    )
+    assert one_page_res["pagesFetched"] == 1, one_page_res
+    assert one_page_res["totalProcessed"] == 200, one_page_res
+    assert one_page_res["cursor"] == seq_before_bulk + 200, one_page_res
+    assert one_page_res["cursor"] < one_page_res["serverLatestSeq"], one_page_res
+
+    # Now run full multi-page REST resync and verify the remaining 35 events (201..235) are processed with zero missed events
+    full_rest_res = cdp.eval_js(
+        "return window.__pcNotificationsState.resyncViaRest({ triggerLiveAlerts: false });"
+    )
+    assert full_rest_res["totalProcessed"] == 35, full_rest_res
+    assert full_rest_res["cursor"] == bulk_rest_target_seq, full_rest_res
+    rest_row_count = cdp.eval_js(
+        f"""
+        const row = document.querySelector('#notif-incidents-tbody tr[data-incident-id="{bulk_rest_inc_id}"]');
+        return row ? Number(row.dataset.count) : 0;
+        """
+    )
+    assert rest_row_count == bulk_rest_count, f"Expected incident count {bulk_rest_count} after >200 multi-page REST resync, got {rest_row_count}"
+
+    # Next, seed >500 events (525 events) while WebSocket is disconnected and verify WebSocket explicit resync / reconnect
+    # delivers all 525 events across multiple 500-item sync pages without skipping 501..525
+    seq_before_ws_bulk = cdp.eval_js("return window.__pcNotificationsState.latestSeq;")
+    bulk_ws_count = 525
+    bulk_ws_last_ev = None
+    for _ in range(bulk_ws_count):
+        bulk_ws_last_ev = api_post(
+            "/api/v1/notifications/ingest",
+            {
+                "event_type": "http_502_503_504",
+                "route_id": "route:app-b",
+                "domain": "app-b.local.test",
+                "reason": "HTTP 503 on /v1/bulk-ws-backlog",
+            },
+        )["event"]
+    bulk_ws_inc_id = bulk_ws_last_ev["incident_id"]
+    bulk_ws_target_seq = int(bulk_ws_last_ev["seq"])
+    assert bulk_ws_target_seq >= seq_before_ws_bulk + bulk_ws_count, (
+        seq_before_ws_bulk,
+        bulk_ws_target_seq,
+    )
+
+    # Test WebSocket explicit {"action": "resync", "since_seq": seq_before_ws_bulk} over a raw WebSocket connection in the browser
+    ws_explicit_resync = cdp.eval_js(
+        f"""
+        return new Promise((resolve, reject) => {{
+          const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+          // Connect at latest seq first so initial sync is empty, then send explicit action=resync for >500 backlog
+          const sock = new WebSocket(`${{wsProto}}//${{location.host}}/api/v1/notifications/ws?since_seq={bulk_ws_target_seq}`);
+          const receivedSeqs = [];
+          let syncFrames = 0;
+          let initialSyncDone = false;
+          const timer = setTimeout(() => {{
+            try {{ sock.close(); }} catch (_e) {{}}
+            reject(new Error(`Timeout waiting for WS multi-page resync: got ${{receivedSeqs.length}} events across ${{syncFrames}} frames`));
+          }}, 8000);
+          sock.onmessage = (ev) => {{
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'sync') {{
+              if (!initialSyncDone) {{
+                initialSyncDone = true;
+                sock.send(JSON.stringify({{ action: 'resync', since_seq: {seq_before_ws_bulk} }}));
+                return;
+              }}
+              syncFrames += 1;
+              for (const item of (msg.events || [])) {{
+                receivedSeqs.push(Number(item.seq));
+                window.__pcNotificationsState.deliverEvent(item);
+              }}
+              if (!msg.has_more && receivedSeqs.length >= {bulk_ws_count}) {{
+                clearTimeout(timer);
+                sock.close();
+                resolve({{
+                  syncFrames,
+                  receivedCount: receivedSeqs.length,
+                  firstSeq: receivedSeqs[0],
+                  lastSeq: receivedSeqs[receivedSeqs.length - 1],
+                }});
+              }}
+            }}
+          }};
+          sock.onerror = () => {{
+            clearTimeout(timer);
+            reject(new Error('WebSocket error during multi-page resync test'));
+          }};
+        }});
+        """
+    )
+    assert ws_explicit_resync["syncFrames"] >= 2, ws_explicit_resync
+    assert ws_explicit_resync["receivedCount"] == bulk_ws_count, ws_explicit_resync
+    assert ws_explicit_resync["firstSeq"] == seq_before_ws_bulk + 1, ws_explicit_resync
+    assert ws_explicit_resync["lastSeq"] == bulk_ws_target_seq, ws_explicit_resync
+
+    ws_bulk_ui = cdp.eval_js(
+        f"""
+        const row = document.querySelector('#notif-incidents-tbody tr[data-incident-id="{bulk_ws_inc_id}"]');
+        return {{
+          latestSeq: window.__pcNotificationsState.latestSeq,
+          rowCount: row ? Number(row.dataset.count) : 0,
+        }};
+        """
+    )
+    assert ws_bulk_ui["latestSeq"] == bulk_ws_target_seq, ws_bulk_ui
+    assert ws_bulk_ui["rowCount"] == bulk_ws_count, ws_bulk_ui
+
+    # Reconnect main UI WebSocket and verify steady state
+    cdp.eval_js("document.getElementById('notif-ws-reconnect-btn').click();")
+    cdp.wait_idle()
+
     # 4) Test denied & unsupported browser notification permission states (AC-12, Rule 7)
     denied_and_unsupported = cdp.eval_js(
         """

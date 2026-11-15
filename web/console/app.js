@@ -46,6 +46,7 @@ const appState = {
   selectedIncidentEvents: [],
   liveStreamEvents: [],
   notifLatestSeq: 0,
+  notifServerLatestSeq: 0,
   notifInitialLoadSeq: null,
   notifProcessedSeqs: new Set(),
   notifBrowserNotifiedSeqs: new Set(),
@@ -5303,6 +5304,9 @@ window.__pcNotificationsState = {
   get latestSeq() {
     return appState.notifLatestSeq;
   },
+  get serverLatestSeq() {
+    return appState.notifServerLatestSeq;
+  },
   get processedSeqCount() {
     return appState.notifProcessedSeqs.size;
   },
@@ -5320,6 +5324,40 @@ window.__pcNotificationsState = {
   },
   deliverEvent(ev) {
     return handleIncomingNotificationEvent(ev, { isLive: true });
+  },
+  setCursor(seq, { resetProcessedAbove = true } = {}) {
+    const clean = Math.max(0, Number(seq || 0));
+    appState.notifLatestSeq = clean;
+    if (resetProcessedAbove) {
+      for (const s of Array.from(appState.notifProcessedSeqs)) {
+        if (s > clean) {
+          appState.notifProcessedSeqs.delete(s);
+        }
+      }
+    }
+    renderNotificationsStatus();
+    return appState.notifLatestSeq;
+  },
+  resyncViaRest(opts = {}) {
+    return resyncNotificationsViaRest(opts);
+  },
+  disconnectWsForTest() {
+    if (appState.wsReconnectTimer) {
+      window.clearTimeout(appState.wsReconnectTimer);
+      appState.wsReconnectTimer = null;
+    }
+    if (appState.wsSocket) {
+      try {
+        appState.wsSocket.onclose = null;
+        appState.wsSocket.onerror = null;
+        appState.wsSocket.onmessage = null;
+        appState.wsSocket.close();
+      } catch (_err) {
+        // ignore
+      }
+      appState.wsSocket = null;
+    }
+    setWsFeedState("disconnected");
   },
 };
 
@@ -5522,6 +5560,9 @@ function setWsFeedState(state, detailMessage = "") {
   }
   if (notifWsSeqBadge) {
     notifWsSeqBadge.dataset.latestSeq = String(appState.notifLatestSeq);
+    notifWsSeqBadge.dataset.serverLatestSeq = String(
+      appState.notifServerLatestSeq || appState.notifLatestSeq
+    );
     notifWsSeqBadge.textContent = `Cursor seq: ${appState.notifLatestSeq}`;
   }
 }
@@ -5754,6 +5795,9 @@ function renderNotificationsStatus() {
   }
   if (notifWsSeqBadge) {
     notifWsSeqBadge.dataset.latestSeq = String(appState.notifLatestSeq);
+    notifWsSeqBadge.dataset.serverLatestSeq = String(
+      appState.notifServerLatestSeq || appState.notifLatestSeq
+    );
     notifWsSeqBadge.textContent = `Cursor seq: ${appState.notifLatestSeq}`;
   }
 
@@ -6367,23 +6411,62 @@ function handleIncomingNotificationEvent(ev, { isLive = true } = {}) {
   return true;
 }
 
-async function resyncNotificationsViaRest({ triggerLiveAlerts = true } = {}) {
-  const sinceSeq = Number(appState.notifLatestSeq || 0);
+async function resyncNotificationsViaRest({
+  triggerLiveAlerts = true,
+  maxPages = 50,
+} = {}) {
+  let cursor = Number(appState.notifLatestSeq || 0);
+  let pagesFetched = 0;
+  let totalProcessed = 0;
   try {
-    const evData = await apiRequest(
-      `/api/v1/notifications/events?since_seq=${sinceSeq}&limit=200`
-    );
-    const items = evData.items || [];
-    for (const ev of items) {
-      handleIncomingNotificationEvent(ev, { isLive: triggerLiveAlerts });
-    }
-    if (typeof evData.latest_seq === "number" && evData.latest_seq > appState.notifLatestSeq) {
-      appState.notifLatestSeq = evData.latest_seq;
+    while (pagesFetched < maxPages) {
+      pagesFetched += 1;
+      const evData = await apiRequest(
+        `/api/v1/notifications/events?since_seq=${cursor}&limit=200`
+      );
+      if (typeof evData.latest_seq === "number") {
+        appState.notifServerLatestSeq = Math.max(
+          appState.notifServerLatestSeq,
+          evData.latest_seq
+        );
+      }
+      const items = Array.isArray(evData.items) ? evData.items : [];
+      if (items.length === 0) {
+        break;
+      }
+      let pageMaxSeq = cursor;
+      for (const ev of items) {
+        const s = Number(ev.seq || 0);
+        if (s > pageMaxSeq) {
+          pageMaxSeq = s;
+        }
+        if (
+          handleIncomingNotificationEvent(ev, { isLive: triggerLiveAlerts })
+        ) {
+          totalProcessed += 1;
+        } else if (s > appState.notifLatestSeq) {
+          // Even if already in notifProcessedSeqs, advance contiguous cursor only to actually inspected seq
+          appState.notifLatestSeq = s;
+        }
+      }
+      if (pageMaxSeq <= cursor) {
+        break;
+      }
+      cursor = pageMaxSeq;
+      if (!evData.has_more && items.length < 200) {
+        break;
+      }
     }
     renderNotificationsStatus();
   } catch (_err) {
     // Non-fatal during background resync
   }
+  return {
+    cursor: appState.notifLatestSeq,
+    serverLatestSeq: appState.notifServerLatestSeq,
+    pagesFetched,
+    totalProcessed,
+  };
 }
 
 function connectNotificationsWebSocket({ forceReconnect = false } = {}) {
@@ -6431,7 +6514,7 @@ function connectNotificationsWebSocket({ forceReconnect = false } = {}) {
     appState.notificationsError = null;
     setWsFeedState("connected");
     renderNotificationsStatus();
-    // Perform cursor resync over REST as well to guarantee zero missed events
+    // Perform multi-page cursor resync over REST as well to guarantee zero missed events
     resyncNotificationsViaRest({ triggerLiveAlerts: true });
   };
 
@@ -6447,6 +6530,10 @@ function connectNotificationsWebSocket({ forceReconnect = false } = {}) {
     }
     if (payload.type === "hello") {
       const srvSeq = Number(payload.latest_seq || 0);
+      appState.notifServerLatestSeq = Math.max(
+        appState.notifServerLatestSeq,
+        srvSeq
+      );
       if (appState.notifInitialLoadSeq === null) {
         appState.notifInitialLoadSeq = srvSeq;
       }
@@ -6455,6 +6542,10 @@ function connectNotificationsWebSocket({ forceReconnect = false } = {}) {
     }
     if (payload.type === "sync" || payload.type === "resync_events") {
       const srvSeq = Number(payload.latest_seq || 0);
+      appState.notifServerLatestSeq = Math.max(
+        appState.notifServerLatestSeq,
+        srvSeq
+      );
       if (appState.notifInitialLoadSeq === null) {
         appState.notifInitialLoadSeq = srvSeq;
       }
@@ -6470,6 +6561,11 @@ function connectNotificationsWebSocket({ forceReconnect = false } = {}) {
       return;
     }
     if (payload.type === "notification_event" && payload.event) {
+      const evSeq = Number(payload.seq || payload.event.seq || 0);
+      appState.notifServerLatestSeq = Math.max(
+        appState.notifServerLatestSeq,
+        evSeq
+      );
       handleIncomingNotificationEvent(payload.event, { isLive: true });
       setWsFeedState("connected");
     }
@@ -6504,10 +6600,13 @@ async function loadNotificationsState({ preserveBanner = true } = {}) {
   beginOp();
   try {
     const qs = buildNotificationsFilterQuery();
+    const isInitialLoad = appState.notifInitialLoadSeq === null;
     const [statusData, incidentsData, eventsData] = await Promise.all([
       apiRequest("/api/v1/notifications/status"),
       apiRequest(`/api/v1/notifications/incidents?${qs}`),
-      apiRequest("/api/v1/notifications/events?limit=40"),
+      isInitialLoad
+        ? apiRequest("/api/v1/notifications/events?limit=40")
+        : Promise.resolve({ items: [], latest_seq: 0 }),
     ]);
 
     appState.notificationsAvailable = true;
@@ -6519,31 +6618,42 @@ async function loadNotificationsState({ preserveBanner = true } = {}) {
     const srvLatestSeq = Number(
       statusData.latest_seq ?? eventsData.latest_seq ?? 0
     );
-    if (appState.notifInitialLoadSeq === null) {
-      appState.notifInitialLoadSeq = srvLatestSeq;
-    }
-    if (srvLatestSeq > appState.notifLatestSeq) {
-      appState.notifLatestSeq = srvLatestSeq;
-    }
-
-    const evItems = Array.isArray(eventsData.items) ? eventsData.items : [];
-    for (const ev of evItems) {
-      const s = Number(ev.seq || 0);
-      if (s > 0) {
-        appState.notifProcessedSeqs.add(s);
-      }
-    }
-    // Merge events into liveStreamEvents sorted descending by seq
-    const mergedBySeq = new Map();
-    for (const ev of [...appState.liveStreamEvents, ...evItems]) {
-      const s = Number(ev.seq || 0);
-      if (s > 0 && !mergedBySeq.has(s)) {
-        mergedBySeq.set(s, ev);
-      }
-    }
-    appState.liveStreamEvents = Array.from(mergedBySeq.values()).sort(
-      (a, b) => Number(b.seq || 0) - Number(a.seq || 0)
+    appState.notifServerLatestSeq = Math.max(
+      appState.notifServerLatestSeq,
+      srvLatestSeq
     );
+
+    if (isInitialLoad) {
+      appState.notifInitialLoadSeq = srvLatestSeq;
+      const evItems = Array.isArray(eventsData.items) ? eventsData.items : [];
+      for (const ev of evItems) {
+        const s = Number(ev.seq || 0);
+        if (s > 0) {
+          appState.notifProcessedSeqs.add(s);
+          if (s > appState.notifLatestSeq) {
+            appState.notifLatestSeq = s;
+          }
+        }
+      }
+      if (srvLatestSeq > appState.notifLatestSeq) {
+        appState.notifLatestSeq = srvLatestSeq;
+      }
+      // Merge initial tail events into liveStreamEvents sorted descending by seq
+      const mergedBySeq = new Map();
+      for (const ev of [...appState.liveStreamEvents, ...evItems]) {
+        const s = Number(ev.seq || 0);
+        if (s > 0 && !mergedBySeq.has(s)) {
+          mergedBySeq.set(s, ev);
+        }
+      }
+      appState.liveStreamEvents = Array.from(mergedBySeq.values()).sort(
+        (a, b) => Number(b.seq || 0) - Number(a.seq || 0)
+      );
+    } else if (srvLatestSeq > appState.notifLatestSeq) {
+      // Never jump notifLatestSeq directly to srvLatestSeq when unconsumed events exist!
+      // Instead, drain all pending pages via cursor-based REST resync.
+      await resyncNotificationsViaRest({ triggerLiveAlerts: true });
+    }
 
     syncBrowserNotificationUI();
     renderNotificationsStatus();
@@ -6758,16 +6868,27 @@ if (enableBrowserNotifBtn) {
 
 if (notifWsReconnectBtn) {
   notifWsReconnectBtn.addEventListener("click", async () => {
-    connectNotificationsWebSocket({ forceReconnect: true });
-    await resyncNotificationsViaRest({ triggerLiveAlerts: true });
-    await loadNotificationsState({ preserveBanner: false });
+    beginOp();
+    try {
+      await resyncNotificationsViaRest({ triggerLiveAlerts: true });
+      connectNotificationsWebSocket({ forceReconnect: true });
+      await loadNotificationsState({ preserveBanner: false });
+    } finally {
+      endOp();
+    }
   });
 }
 
 if (retryNotificationsBtn) {
   retryNotificationsBtn.addEventListener("click", async () => {
-    connectNotificationsWebSocket({ forceReconnect: true });
-    await loadNotificationsState({ preserveBanner: false });
+    beginOp();
+    try {
+      await resyncNotificationsViaRest({ triggerLiveAlerts: true });
+      connectNotificationsWebSocket({ forceReconnect: true });
+      await loadNotificationsState({ preserveBanner: false });
+    } finally {
+      endOp();
+    }
   });
 }
 

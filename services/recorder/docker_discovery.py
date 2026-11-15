@@ -456,8 +456,10 @@ class DockerDiscoveryService:
         self,
         *,
         scope: str = "project",
+        persist_status: bool = True,
     ) -> dict[str, Any]:
-        self.store.ensure_schema()
+        if persist_status:
+            self.store.ensure_schema()
         socket_path = self.get_configured_socket_path()
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -515,31 +517,33 @@ class DockerDiscoveryService:
                 t for t in all_targets if t["running"] and not t["is_self"]
             ]
 
-            with self.store._connect() as conn:
-                conn.execute(
-                    """
-                    UPDATE discovery_status
-                    SET available = 1,
-                        status = 'ok',
-                        last_refresh_at = ?,
-                        last_success_at = ?,
-                        last_error = NULL,
-                        containers_count = ?,
-                        running_containers_count = ?,
-                        targets_count = ?,
-                        updated_at = ?
-                    WHERE id = 1
-                    """,
-                    (
-                        now_iso,
-                        now_iso,
-                        len(non_self_containers),
-                        len(running_non_self),
-                        len(selectable_targets),
-                        now_iso,
-                    ),
-                )
-                conn.commit()
+            if persist_status:
+                with self.store._connect() as conn:
+                    conn.execute(
+                        """
+                        UPDATE discovery_status
+                        SET available = 1,
+                            status = 'ok',
+                            last_refresh_at = ?,
+                            last_success_at = ?,
+                            last_error = NULL,
+                            containers_count = ?,
+                            running_containers_count = ?,
+                            targets_count = ?,
+                            updated_at = ?
+                        WHERE id = 1
+                        """,
+                        (
+                            now_iso,
+                            now_iso,
+                            len(non_self_containers),
+                            len(running_non_self),
+                            len(selectable_targets),
+                            now_iso,
+                        ),
+                    )
+                    conn.commit()
+                self.store.retention.checkpoint_wal()
 
             return {
                 "available": True,
@@ -553,23 +557,25 @@ class DockerDiscoveryService:
             }
         except Exception as exc:
             err_msg = str(exc)
-            with self.store._connect() as conn:
-                conn.execute(
-                    """
-                    UPDATE discovery_status
-                    SET available = 0,
-                        status = 'unavailable',
-                        last_refresh_at = ?,
-                        last_error = ?,
-                        containers_count = 0,
-                        running_containers_count = 0,
-                        targets_count = 0,
-                        updated_at = ?
-                    WHERE id = 1
-                    """,
-                    (now_iso, err_msg, now_iso),
-                )
-                conn.commit()
+            if persist_status:
+                with self.store._connect() as conn:
+                    conn.execute(
+                        """
+                        UPDATE discovery_status
+                        SET available = 0,
+                            status = 'unavailable',
+                            last_refresh_at = ?,
+                            last_error = ?,
+                            containers_count = 0,
+                            running_containers_count = 0,
+                            targets_count = 0,
+                            updated_at = ?
+                        WHERE id = 1
+                        """,
+                        (now_iso, err_msg, now_iso),
+                    )
+                    conn.commit()
+                self.store.retention.checkpoint_wal()
             return {
                 "available": False,
                 "status": "unavailable",
@@ -844,13 +850,15 @@ class DockerDiscoveryService:
             "resolved_target": matched_target,
         }
 
-    def get_container_states_map(self) -> dict[str, dict[str, Any]]:
+    def get_container_states_map(
+        self, *, persist_status: bool = False
+    ) -> dict[str, dict[str, Any]]:
         """Best-effort map of service_name / container_name / container_id -> state info."""
         socket_path = self.get_configured_socket_path()
         if not os.path.exists(socket_path):
             return {}
         try:
-            scan = self._scan_docker()
+            scan = self._scan_docker(persist_status=persist_status)
             if not scan["available"]:
                 return {}
             out: dict[str, dict[str, Any]] = {}
