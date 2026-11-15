@@ -1,19 +1,19 @@
 {
   "protocol_version": 1,
-  "dispatch_id": 13,
-  "issued_at": "2026-11-15T14:23:34+09:00",
+  "dispatch_id": 14,
+  "issued_at": "2026-11-15T17:47:57+09:00",
   "issued_by": "orchestrator",
   "recipient": "implementer",
-  "command": "execute_task",
+  "command": "revise_task",
   "task_id": "DEV-042",
   "task_file": "docs/tasks/DEV-042.md",
-  "base_commit": "a7be859",
+  "base_commit": "df4db0f",
   "previous_task": {
-    "task_id": "DEV-041",
-    "decision": "approved",
-    "review_file": "docs/reviews/DEV-041-review-001.md"
+    "task_id": "DEV-042",
+    "decision": "changes_requested",
+    "review_file": "docs/reviews/DEV-042-review-001.md"
   },
-  "required_action": "Pull origin/main, acknowledge dispatch 13, execute DEV-042, push implementation and verification evidence, then wait for review.",
+  "required_action": "Pull origin/main, acknowledge dispatch 14, read docs/reviews/DEV-042-review-001.md, fix both blocking findings with backlog regression tests, push verification evidence, then wait for review.",
   "state": "assigned"
 }
 
