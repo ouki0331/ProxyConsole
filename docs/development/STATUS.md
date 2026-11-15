@@ -6,8 +6,8 @@ Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 pendi
 Active task: DEV-042
 Task status: Ready for review
 Owner: orchestrator
-Last verified commit: `6aca2d6` (DEV-042 Review 001 fixes verified with test_retention_cleanup.sh, test_notifications_console.sh, and full make test suite)
-Last substantive remote progress: `6aca2d6` (DEV-042 Review 001 fixes for retention soft-limit stability and multi-page REST/WebSocket cursor resync implemented and verified)
+Last verified commit: `b78d7a8` (DEV-042 Review 001 fixes verified with test_retention_cleanup.sh, test_notifications_console.sh, and full make test suite)
+Last substantive remote progress: `b78d7a8` (DEV-042 Review 001 fixes for retention soft-limit stability and multi-page REST/WebSocket cursor resync implemented and verified)
 Task definition baseline: `a7be859`
 Dispatched at: 2026-11-15 14:23 JST
 Mailbox dispatch: `14` (`.agents/dispatch.json`)

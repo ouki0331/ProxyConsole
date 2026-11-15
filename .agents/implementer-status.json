@@ -5,7 +5,7 @@
   "state": "ready_for_review",
   "owner": "orchestrator",
   "updated_at": "2026-11-15T09:30:00Z",
-  "artifact_commit": "6aca2d6",
+  "artifact_commit": "b78d7a8",
   "verification_command": "make clean && make config-test && make test && make down",
   "verification_passed": true,
   "summary": "DEV-042 Review 001 の指摘2件（バックグラウンドSQLite書き込みによるretention soft-limit回帰、およびREST/WebSocket再同期時のページ上限超過カーソル欠落）を修正し、>200件REST・>500件WebSocketのマルチページ再同期回帰テストおよびDEV-001〜DEV-042全統合テストの成功を確認しました。",
