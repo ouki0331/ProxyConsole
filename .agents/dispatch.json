@@ -1,19 +1,19 @@
 {
   "protocol_version": 1,
-  "dispatch_id": 11,
-  "issued_at": "2026-11-07T18:38:00+09:00",
+  "dispatch_id": 12,
+  "issued_at": "2026-11-15T10:49:24+09:00",
   "issued_by": "orchestrator",
   "recipient": "implementer",
-  "command": "revise_task",
-  "task_id": "DEV-040",
-  "task_file": "docs/tasks/DEV-040.md",
-  "base_commit": "26435d7",
+  "command": "execute_task",
+  "task_id": "DEV-041",
+  "task_file": "docs/tasks/DEV-041.md",
+  "base_commit": "4e6c1e4",
   "previous_task": {
     "task_id": "DEV-040",
-    "decision": "changes_requested",
-    "review_file": "docs/reviews/DEV-040-review-001.md"
+    "decision": "approved",
+    "review_file": "docs/reviews/DEV-040-review-002.md"
   },
-  "required_action": "No further action for dispatch 11. This Agent task timed out after 120 minutes without substantive progress; wait for a new dispatch before resuming.",
-  "state": "timed_out"
+  "required_action": "Pull origin/main, acknowledge dispatch 12, execute DEV-041, push implementation and verification evidence, then wait for review.",
+  "state": "assigned"
 }
 
