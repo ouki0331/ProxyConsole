@@ -1,13 +1,13 @@
 {
   "protocol_version": 1,
-  "handled_dispatch_id": 12,
-  "task_id": "DEV-041",
-  "state": "ready_for_review",
-  "owner": "orchestrator",
-  "updated_at": "2026-11-15T05:06:00Z",
-  "artifact_commit": "b7f53cf",
-  "verification_command": "make clean && make config-test && make test && make down",
-  "verification_passed": true,
-  "summary": "DEV-041 Web automatic modification rule management console（Rulesワークスペース、構造化Match/Actionエディタ、複製/削除/未保存変更破棄確認dialog、Inline/Stored Capture Dry-Run Preview、Capture Detailからのルール遷移・フィルタ、HTTP 503障害隔離、Playwright Browser E2Eテスト test_web_rules_console.sh）を実装し、make clean && make config-test && make test && make down の全検証を通過して Ready for review に更新しました。",
+  "handled_dispatch_id": 13,
+  "task_id": "DEV-042",
+  "state": "working",
+  "owner": "implementer",
+  "updated_at": "2026-11-15T05:28:00Z",
+  "artifact_commit": null,
+  "verification_command": null,
+  "verification_passed": null,
+  "summary": "dispatch 13 (DEV-042 Aggregated local notifications and live event feed) を受領し、実装と検証を開始しました。",
   "blocker": null
 }
