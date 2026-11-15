@@ -1,4 +1,4 @@
-.PHONY: certs up down config-test test clean
+.PHONY: certs up down config-test test readiness-check clean
 
 certs:
 	./scripts/generate-certs.sh
@@ -25,6 +25,9 @@ test:
 	./tests/integration/test_modification_rules.sh
 	./tests/integration/test_web_rules_console.sh
 	./tests/integration/test_notifications_console.sh
+
+readiness-check:
+	./scripts/check-company-readiness.sh
 
 clean:
 	./scripts/down.sh
