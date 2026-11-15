@@ -1,13 +1,13 @@
 {
   "protocol_version": 1,
-  "handled_dispatch_id": 15,
-  "task_id": "DEV-050",
-  "state": "ready_for_review",
-  "owner": "orchestrator",
-  "updated_at": "2026-11-15T12:10:40Z",
-  "artifact_commit": "a4814f6",
-  "verification_command": "make clean && make config-test && make test && ./scripts/check-company-readiness.sh && make down && make up",
-  "verification_passed": true,
-  "summary": "DEV-050 (Company-environment readiness assessment) を完了しました。COMPANY_READINESS.md、LOCAL_RUNBOOK.md、scripts/check-company-readiness.sh を作成し、DEV-001〜DEV-042 の全12統合テストスイートと Readiness / バックアップ・リストア / Disk-full 検証スクリプトの成功を確認しました。現在 Ready for review です。",
+  "handled_dispatch_id": 16,
+  "task_id": "DEV-060",
+  "state": "working",
+  "owner": "implementer",
+  "updated_at": "2026-11-15T12:51:00Z",
+  "artifact_commit": null,
+  "verification_command": null,
+  "verification_passed": null,
+  "summary": "dispatch 16 (DEV-060 Japanese localization, overview dashboard, and workspace shortcuts) を受領し、英語/日本語i18n、フォームなしOverview、Alt+1..5ショートカットの実装作業を開始しました。",
   "blocker": null
 }
