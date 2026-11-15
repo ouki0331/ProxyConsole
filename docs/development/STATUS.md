@@ -1,16 +1,16 @@
 # Project status
 
 Updated: 2026-11-15
-Phase: P5
-Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 pending
-Active task: DEV-042
-Task status: Ready for review
-Owner: orchestrator
-Last verified commit: `b78d7a8` (DEV-042 Review 001 fixes verified with test_retention_cleanup.sh, test_notifications_console.sh, and full make test suite)
+Phase: P6
+Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 pending
+Active task: DEV-050
+Task status: In progress
+Owner: implementer
+Last verified commit: `b78d7a8` (DEV-042 approved by independent review 002; Review 001 findings fixed and all 12 suites verified)
 Last substantive remote progress: `b78d7a8` (DEV-042 Review 001 fixes for retention soft-limit stability and multi-page REST/WebSocket cursor resync implemented and verified)
-Task definition baseline: `a7be859`
-Dispatched at: 2026-11-15 14:23 JST
-Mailbox dispatch: `14` (`.agents/dispatch.json`)
+Task definition baseline: `dfed526`
+Dispatched at: 2026-11-15 20:29 JST
+Mailbox dispatch: `15` (`.agents/dispatch.json`)
 
 ## Current summary
 
@@ -27,12 +27,13 @@ Mailbox dispatch: `14` (`.agents/dispatch.json`)
 - DEV-031 は独立機能 review に合格し、G4 を通過した。
 - DEV-040 は独立機能 review 002 に合格し、`Done` となった。
 - DEV-041 は独立機能 review 001 に合格し、`Done` となった。
-- DEV-042 review 001 で指摘された 2 件（バックグラウンド SQLite WAL 書き込みによる retention soft-limit 回帰、およびページ上限超過時の REST / WebSocket カーソル再同期のイベント欠落）を修正し、>200件 REST / >500件 WebSocket バックログ回帰テストおよび DEV-001〜DEV-042 全統合テストスイートの成功を確認して `Ready for review` とした。
+- DEV-042 は独立機能 review 002 に合格し、`Done`、G5 passed となった。
+- DEV-050 Company-environment readiness assessment を dispatch 15 で開始した。公開化や認証方式を実装せず、現状の境界・データ・証明書・Docker socket・backup/restore・運用性を評価する。
 
 ## Next transition
 
-orchestrator が DEV-042 の review 002（独立機能レビュー）を実施し、合格後に G5 判定と P6 タスク作成へ進む。
+implementer が dispatch 15 を受領し、DEV-050 の readiness assessment と再現可能な検証を実施して `Ready for review` にする。
 
 ## Blocking items
 
-- なし（orchestrator による DEV-042 review 002 待ち）
+- なし。会社固有ポリシーが必要な項目は DEV-050 で `company_decision_required` として分類する。

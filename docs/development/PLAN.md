@@ -2,8 +2,8 @@
 
 更新日: 2026-11-06  
 計画状態: Active  
-現在フェーズ: P5 — 変更ルールと通知
-実装状態: G4 passed / DEV-041 approved / DEV-042 in progress
+現在フェーズ: P6 — 会社環境候補の再評価
+実装状態: G5 passed / DEV-042 approved / DEV-050 in progress
 
 ## 1. バージョン目標
 
@@ -199,5 +199,5 @@ G4 不合格時:
 
 ## 7. 次に開始できるタスク
 
-`DEV-042`。DEV-041 が独立レビューで合格したため、aggregated local notifications と live event feed を開始できる。
+`DEV-050`。DEV-042 が独立レビューで合格し G5 を通過したため、会社環境候補としての trust boundary、data risk、backup/restore、運用性を評価できる。
 

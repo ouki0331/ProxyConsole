@@ -1,19 +1,19 @@
 {
   "protocol_version": 1,
-  "dispatch_id": 14,
-  "issued_at": "2026-11-15T17:47:57+09:00",
+  "dispatch_id": 15,
+  "issued_at": "2026-11-15T20:29:42+09:00",
   "issued_by": "orchestrator",
   "recipient": "implementer",
-  "command": "revise_task",
-  "task_id": "DEV-042",
-  "task_file": "docs/tasks/DEV-042.md",
-  "base_commit": "df4db0f",
+  "command": "execute_task",
+  "task_id": "DEV-050",
+  "task_file": "docs/tasks/DEV-050.md",
+  "base_commit": "dfed526",
   "previous_task": {
     "task_id": "DEV-042",
-    "decision": "changes_requested",
-    "review_file": "docs/reviews/DEV-042-review-001.md"
+    "decision": "approved",
+    "review_file": "docs/reviews/DEV-042-review-002.md"
   },
-  "required_action": "Pull origin/main, acknowledge dispatch 14, read docs/reviews/DEV-042-review-001.md, fix both blocking findings with backlog regression tests, push verification evidence, then wait for review.",
+  "required_action": "Pull origin/main, acknowledge dispatch 15, execute DEV-050 as an evidence-based assessment without deploying to a company environment or inventing authentication policy, push artifacts and verification evidence, then wait for review.",
   "state": "assigned"
 }
 
