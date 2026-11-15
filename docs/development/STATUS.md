@@ -4,10 +4,10 @@ Updated: 2026-11-15
 Phase: P5
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 pending
 Active task: DEV-041
-Task status: In progress
-Owner: implementer
-Last verified commit: `3f24d07` (DEV-040 approved by independent review 002; Review 001 blocking findings fixed and full regression suite verified)
-Last substantive remote progress: `3f24d07` (DEV-040 Review 001 blocking findings fixed and full regression suite verified)
+Task status: Ready for review
+Owner: orchestrator
+Last verified commit: `c9dab76` (DEV-041 Web automatic modification rule management console implemented and verified across all 11 test suites)
+Last substantive remote progress: `c9dab76` (DEV-041 Web automatic modification rule management console implemented and verified)
 Task definition baseline: `4e6c1e4`
 Dispatched at: 2026-11-15 10:49 JST
 Mailbox dispatch: `12` (`.agents/dispatch.json`)
@@ -25,13 +25,12 @@ Mailbox dispatch: `12` (`.agents/dispatch.json`)
 - DEV-022 は独立機能 review に合格し、G3 を通過した。
 - DEV-030 は独立機能 review に合格した。
 - DEV-031 は独立機能 review に合格し、G4 を通過した。
-- DEV-040 review 001 の blocking finding 3 件（後続 rule の working state のみでの match、streamed request の skipped 一貫化、保護対象 header の skipped / summary 一貫化）を修正して回帰テストを追加し、`make clean && make config-test && make test && make down` の全検証を通過して `Ready for review` に戻した。
 - DEV-040 は独立機能 review 002 に合格し、`Done` となった。
-- P5 の DEV-041 Web automatic modification rule management console を実装 Agent へ dispatch した。
+- DEV-041 Web automatic modification rule management console（Rules ワークスペース、構造化 Match/Action エディタ、複製/削除/未保存変更確認 `<dialog>`、Inline/Stored Capture Dry-Run Preview、Capture Detail からのルール遷移・フィルタ、HTTP 503 障害隔離、Playwright Browser E2E テスト `test_web_rules_console.sh`）を実装し、`make clean && make config-test && make test && make down` の全検証を通過して `Ready for review` に遷移した。
 
 ## Next transition
 
-implementer が dispatch 12 を acknowledge し、DEV-041 を実装・検証して `Ready for review` にする。
+orchestrator が DEV-041 の独立機能 review を実施する。
 
 ## Blocking items
 

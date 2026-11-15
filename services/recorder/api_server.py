@@ -33,6 +33,7 @@ from route_manager import (
 )
 from rule_engine import (
     RuleNotFoundError,
+    RulesUnavailableError,
     RuleValidationError,
 )
 
@@ -489,6 +490,11 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 404,
                 {"error": "not_found", "path": path},
             )
+        except RulesUnavailableError as exc:
+            self._send_json(
+                503,
+                {"error": exc.code, "message": str(exc)},
+            )
         except ValueError as exc:
             self._send_json(
                 400,
@@ -613,6 +619,11 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 self._send_json(200, res)
                 return
             self._send_json(404, {"error": "not_found", "path": path})
+        except RulesUnavailableError as exc:
+            self._send_json(
+                503,
+                {"error": exc.code, "message": str(exc)},
+            )
         except RuleNotFoundError as exc:
             self._send_json(
                 404,
@@ -717,6 +728,11 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 self._send_json(200, res)
                 return
             self._send_json(404, {"error": "not_found", "path": path})
+        except RulesUnavailableError as exc:
+            self._send_json(
+                503,
+                {"error": exc.code, "message": str(exc)},
+            )
         except RuleNotFoundError as exc:
             self._send_json(
                 404,
@@ -780,6 +796,12 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
             if path == "/api/v1/discovery/config":
                 override = body.get("socket_path_override")
                 res = self.store.discovery.set_socket_path_override(override)
+                self._send_json(200, res)
+                return
+
+            if path == "/api/v1/rules/config":
+                sim_unavail = bool(body.get("simulate_unavailable", False))
+                res = self.store.rules.set_simulate_unavailable(sim_unavail)
                 self._send_json(200, res)
                 return
 
@@ -939,7 +961,7 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                     else body,
                     rule_ids=body.get("rule_ids"),
                     include_disabled=include_disabled,
-                    candidate_rule=body.get("candidate_rule"),
+                    candidate_rule=body.get("candidate_rule") or body.get("rule"),
                     rules=body.get("rules"),
                 )
                 self._send_json(200, res)
@@ -962,7 +984,7 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                     capture_id=cap_id,
                     rule_ids=body.get("rule_ids"),
                     include_disabled=include_disabled,
-                    candidate_rule=body.get("candidate_rule"),
+                    candidate_rule=body.get("candidate_rule") or body.get("rule"),
                     rules=body.get("rules"),
                 )
                 self._send_json(200, res)
@@ -1139,6 +1161,11 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
             self._send_json(
                 404,
                 {"error": "capture_not_found", "message": str(exc)},
+            )
+        except RulesUnavailableError as exc:
+            self._send_json(
+                503,
+                {"error": exc.code, "message": str(exc)},
             )
         except RuleNotFoundError as exc:
             self._send_json(

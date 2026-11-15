@@ -22,6 +22,9 @@
       <button type="button" id="view-requests-btn" class="btn btn-sm btn-secondary" aria-pressed="false">
         Requests &amp; Replay
       </button>
+      <button type="button" id="view-rules-btn" class="btn btn-sm btn-secondary" aria-pressed="false">
+        Modification Rules
+      </button>
     </nav>
     <div class="header-actions">
       <button type="button" id="refresh-all-btn" class="btn btn-secondary">
@@ -451,6 +454,69 @@
             </div>
 
             <div class="filter-field">
+              <label for="filter-rule-id-input">Rule ID (Any)</label>
+              <input
+                type="text"
+                id="filter-rule-id-input"
+                name="rule_id"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="e.g. rule:auth-inject"
+              >
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-applied-rule-id-input">Applied Rule ID</label>
+              <input
+                type="text"
+                id="filter-applied-rule-id-input"
+                name="applied_rule_id"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="Applied rule..."
+              >
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-failed-rule-id-input">Failed Rule ID</label>
+              <input
+                type="text"
+                id="filter-failed-rule-id-input"
+                name="failed_rule_id"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="Failed rule..."
+              >
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-skipped-rule-id-input">Skipped Rule ID</label>
+              <input
+                type="text"
+                id="filter-skipped-rule-id-input"
+                name="skipped_rule_id"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="Skipped rule..."
+              >
+            </div>
+
+            <div class="filter-field">
+              <label for="filter-rule-outcome-select">Rule Outcome</label>
+              <select id="filter-rule-outcome-select" name="rule_outcome">
+                <option value="">All Outcomes</option>
+                <option value="applied">applied</option>
+                <option value="skipped">skipped</option>
+                <option value="failed">failed</option>
+                <option value="no_match">no_match</option>
+              </select>
+            </div>
+
+            <div class="filter-field">
               <label for="filter-limit-select">Page Size</label>
               <select id="filter-limit-select" name="limit">
                 <option value="5">5 / page</option>
@@ -639,6 +705,84 @@
                 <div>
                   <strong>Replays from this Capture:</strong>
                   <div id="detail-child-replays-list" class="chip-list">None</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- DEV-041: Rule Evaluation Metadata & Navigation -->
+            <div id="detail-rule-evaluation-box" class="lineage-box" data-outcome="no_match">
+              <div class="card-header" style="margin-block-end: 0.5rem;">
+                <div>
+                  <h3>Automatic Modification Rule Evaluation (DEV-040)</h3>
+                  <p class="card-subtitle">Click a rule ID to inspect/edit it in the Rules workspace or filter captured requests by that rule.</p>
+                </div>
+                <div class="row-actions">
+                  <span id="detail-rule-outcome-badge" class="badge badge-neutral">no_match</span>
+                  <button type="button" id="detail-preview-rules-btn" class="btn btn-secondary btn-sm">
+                    Dry-Run Preview Rules on This Capture
+                  </button>
+                </div>
+              </div>
+              <dl class="kv-grid" style="margin-block-end: 0.65rem;">
+                <dt>Overall Outcome</dt>
+                <dd><code id="detail-rule-outcome-text">no_match</code></dd>
+                <dt>Modified / Failed</dt>
+                <dd><code id="detail-rule-modified-text">modified=false, failed=false</code></dd>
+                <dt>Change Summary Count</dt>
+                <dd><code id="detail-rule-change-count">0</code></dd>
+              </dl>
+              <div class="lineage-lists">
+                <div>
+                  <strong>Matched Rules:</strong>
+                  <div id="detail-matched-rules-list" class="chip-list">None</div>
+                </div>
+                <div>
+                  <strong>Applied Rules:</strong>
+                  <div id="detail-applied-rules-list" class="chip-list">None</div>
+                </div>
+                <div>
+                  <strong>Skipped Rules:</strong>
+                  <div id="detail-skipped-rules-list" class="chip-list">None</div>
+                </div>
+                <div>
+                  <strong>Failed Rules:</strong>
+                  <div id="detail-failed-rules-list" class="chip-list">None</div>
+                </div>
+              </div>
+              <div id="detail-rule-results-wrap" style="margin-block-start: 0.65rem;" hidden>
+                <strong>Per-Rule Evaluation Breakdown:</strong>
+                <div tabindex="0" role="region" aria-label="Capture rule evaluation results" class="table-wrapper compact-table" style="margin-block-start: 0.35rem;">
+                  <table id="detail-rule-results-table">
+                    <caption class="visually-hidden">Per-rule evaluation outcome and reasons for this capture</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Rule ID &amp; Name</th>
+                        <th scope="col">Priority</th>
+                        <th scope="col">Outcome</th>
+                        <th scope="col">Reason / Actions</th>
+                        <th scope="col">Navigate</th>
+                      </tr>
+                    </thead>
+                    <tbody id="detail-rule-results-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="detail-rule-changes-wrap" style="margin-block-start: 0.65rem;" hidden>
+                <strong>Applied Change Summary:</strong>
+                <div tabindex="0" role="region" aria-label="Capture rule modification change summary" class="table-wrapper compact-table" style="margin-block-start: 0.35rem;">
+                  <table id="detail-rule-changes-table">
+                    <caption class="visually-hidden">Detailed before and after changes applied by automatic modification rules</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Rule ID</th>
+                        <th scope="col">Action Type</th>
+                        <th scope="col">Target / Key</th>
+                        <th scope="col">Status &amp; Reason</th>
+                        <th scope="col">Before &rarr; After</th>
+                      </tr>
+                    </thead>
+                    <tbody id="detail-rule-changes-tbody"></tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -1081,6 +1225,612 @@
         </section>
       </div>
     </div>
+
+    <!-- ================================================================
+         DEV-041: Automatic Request Modification Rules & Dry-Run Preview
+         ================================================================ -->
+    <div id="rules-workspace" class="console-workspace">
+      <!-- 1. Rules List Card -->
+      <section id="rules-list-section" class="card" aria-labelledby="rules-heading">
+        <div class="card-header">
+          <div>
+            <h2 id="rules-heading">Automatic Request Modification Rules</h2>
+            <p class="card-subtitle">Evaluated in deterministic order: <code>priority ASC, created_at ASC, rule_id ASC</code> (DEV-040). Changes apply to the next request and persist in SQLite.</p>
+          </div>
+          <div class="discovery-controls">
+            <span id="rules-availability-badge" class="badge badge-success" data-available="true">Rules API Ready</span>
+            <span id="rules-count-badge" class="badge badge-outline">0 / 0 enabled</span>
+            <label for="rules-filter-enabled-select" class="visually-hidden">Filter Rules by Enabled Status</label>
+            <select id="rules-filter-enabled-select" aria-label="Filter Rules by Enabled Status" style="inline-size: auto; min-block-size: 40px; padding: 0.35rem 0.65rem;">
+              <option value="">All Rules</option>
+              <option value="true">Enabled Only</option>
+              <option value="false">Disabled Only</option>
+            </select>
+            <button type="button" id="refresh-rules-btn" class="btn btn-secondary btn-sm">
+              Refresh Rules
+            </button>
+            <button type="button" id="new-rule-btn" class="btn btn-primary btn-sm">
+              + New Rule
+            </button>
+          </div>
+        </div>
+
+        <div id="rules-error-box" class="apply-error-box" role="alert" data-error-code="" hidden>
+          <div class="apply-error-details">
+            <strong id="rules-error-title">Rules API Error</strong>
+            <p id="rules-error-message"></p>
+            <span class="rollback-note">Routes, Docker Discovery, Captured Requests, and Draft Replay workspaces remain unaffected and operational.</span>
+          </div>
+          <div class="apply-error-actions">
+            <button type="button" id="retry-rules-load-btn" class="btn btn-secondary btn-sm">
+              Retry Loading Rules
+            </button>
+          </div>
+        </div>
+
+        <div id="rules-empty-state" class="empty-state" hidden>
+          <p>No automatic modification rules are currently configured. Create a rule using the structured form below.</p>
+        </div>
+
+        <div tabindex="0" role="region" aria-labelledby="rules-table-caption" class="table-wrapper">
+          <table id="rules-table">
+            <caption id="rules-table-caption" class="visually-hidden">Automatic request modification rules ordered by priority</caption>
+            <thead>
+              <tr>
+                <th scope="col">Rule Name &amp; ID</th>
+                <th scope="col">Enabled</th>
+                <th scope="col">Priority &amp; Order</th>
+                <th scope="col">Match Criteria Summary</th>
+                <th scope="col">Ordered Actions Summary</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="rules-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 2. Split Workspace: Structured Rule Form (Left) & Dry-Run Preview Inspector (Right) -->
+      <div class="rules-editor-preview-grid">
+        <!-- Left Panel: Structured Create / Edit Rule Form -->
+        <section id="rule-form-section" class="card" aria-labelledby="rule-form-title">
+          <div class="card-header">
+            <div>
+              <h2 id="rule-form-title">Create New Rule</h2>
+              <p class="card-subtitle">Structured match criteria and ordered modification actions. No manual JSON editing required.</p>
+            </div>
+            <div class="row-actions">
+              <span id="rule-form-mode-badge" class="badge badge-outline">Create Mode</span>
+              <span id="rule-form-dirty-badge" class="badge badge-neutral" data-dirty="false">Clean</span>
+            </div>
+          </div>
+
+          <div id="rule-form-error-box" class="apply-error-box" role="alert" data-error-code="" hidden>
+            <div class="apply-error-details">
+              <strong id="rule-form-error-code">Validation Error</strong>:
+              <span id="rule-form-error-text"></span>
+            </div>
+          </div>
+
+          <form id="rule-form" action="/api/v1/rules" method="POST" novalidate>
+            <input type="hidden" id="rule-edit-mode" name="edit_mode" value="create">
+            <input type="hidden" id="rule-original-id" name="original_rule_id" value="">
+
+            <div class="endpoint-grid">
+              <div class="form-group">
+                <label for="rule-name-input">Rule Name <span class="required-mark">*</span></label>
+                <input
+                  type="text"
+                  id="rule-name-input"
+                  name="name"
+                  required
+                  placeholder="e.g. Inject Debug Trace &amp; Mutate Order"
+                  aria-describedby="rule-name-error"
+                >
+                <span id="rule-name-error" class="field-error" role="alert"></span>
+              </div>
+
+              <div class="form-group">
+                <label for="rule-id-input">Rule ID (optional on create)</label>
+                <input
+                  type="text"
+                  id="rule-id-input"
+                  name="rule_id"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  placeholder="e.g. rule:orders-debug"
+                  aria-describedby="rule-id-hint rule-id-error"
+                >
+                <span id="rule-id-hint" class="field-hint">Auto-generated if left blank in Create mode.</span>
+                <span id="rule-id-error" class="field-error" role="alert"></span>
+              </div>
+
+              <div class="form-group">
+                <label for="rule-priority-input">Priority (-100000 to 100000) <span class="required-mark">*</span></label>
+                <input
+                  type="text"
+                  id="rule-priority-input"
+                  name="priority"
+                  inputmode="numeric"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  value="100"
+                  aria-describedby="rule-priority-hint rule-priority-error"
+                >
+                <span id="rule-priority-hint" class="field-hint">Smaller number runs earlier (e.g. 10 runs before 100).</span>
+                <span id="rule-priority-error" class="field-error" role="alert"></span>
+              </div>
+            </div>
+
+            <div class="endpoint-grid">
+              <div class="form-group">
+                <label for="rule-description-input">Description</label>
+                <input
+                  type="text"
+                  id="rule-description-input"
+                  name="description"
+                  placeholder="Optional description of what this rule modifies"
+                >
+              </div>
+              <div class="form-group" style="display: flex; align-items: center;">
+                <label class="checkbox-inline" for="rule-enabled-checkbox">
+                  <input type="checkbox" id="rule-enabled-checkbox" name="enabled" checked>
+                  <span>Enable rule immediately for live traffic</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Match Criteria Fieldset -->
+            <fieldset id="rule-match-fieldset" class="form-fieldset">
+              <legend>Match Criteria (Logical AND across populated conditions)</legend>
+              <p class="field-hint">Leave any condition blank to match all requests for that attribute.</p>
+
+              <div class="endpoint-grid">
+                <div class="form-group">
+                  <label for="rule-match-route-id-input">Route IDs (comma-separated or single)</label>
+                  <input
+                    type="text"
+                    id="rule-match-route-id-input"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    placeholder="e.g. route:app-a"
+                  >
+                </div>
+
+                <div class="form-group">
+                  <label for="rule-match-domain-input">Domains / Hosts (comma-separated or single)</label>
+                  <input
+                    type="text"
+                    id="rule-match-domain-input"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    placeholder="e.g. app-a.local.test"
+                  >
+                </div>
+
+                <div class="form-group">
+                  <label for="rule-match-method-input">HTTP Methods (comma-separated, e.g. POST, PUT)</label>
+                  <input
+                    type="text"
+                    id="rule-match-method-input"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    placeholder="e.g. POST, PUT"
+                  >
+                </div>
+              </div>
+
+              <div class="endpoint-grid">
+                <div class="form-group">
+                  <label for="rule-match-path-exact-input">Path Exact Match (Decoded Path)</label>
+                  <input
+                    type="text"
+                    id="rule-match-path-exact-input"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    placeholder="e.g. /v1/orders"
+                  >
+                </div>
+
+                <div class="form-group">
+                  <label for="rule-match-path-prefix-input">Path Prefix Match</label>
+                  <input
+                    type="text"
+                    id="rule-match-path-prefix-input"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    placeholder="e.g. /v1/"
+                  >
+                </div>
+
+                <div class="form-group">
+                  <label for="rule-match-path-regex-input">Path Regex Match</label>
+                  <input
+                    type="text"
+                    id="rule-match-path-regex-input"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    placeholder="e.g. ^/v1/orders/[0-9]+$"
+                    aria-describedby="rule-path-regex-error"
+                  >
+                  <span id="rule-path-regex-error" class="field-error" role="alert"></span>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="rule-match-content-type-input">Content-Type Prefix / Substring Match</label>
+                <input
+                  type="text"
+                  id="rule-match-content-type-input"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  placeholder="e.g. application/json or application/x-www-form-urlencoded"
+                >
+              </div>
+
+              <!-- Query Match Conditions -->
+              <div class="detail-subsection">
+                <div class="export-label-row">
+                  <strong>Query Parameter Match Conditions (Ordered Rows)</strong>
+                  <button type="button" id="add-rule-query-match-btn" class="btn btn-secondary btn-sm">
+                    + Add Query Matcher
+                  </button>
+                </div>
+                <div id="rule-query-match-rows" class="pair-editor-list"></div>
+              </div>
+
+              <!-- Header Match Conditions -->
+              <div class="detail-subsection" style="margin-block-end: 0;">
+                <div class="export-label-row">
+                  <strong>Header Match Conditions (Case-Insensitive Name, Ordered Rows)</strong>
+                  <button type="button" id="add-rule-header-match-btn" class="btn btn-secondary btn-sm">
+                    + Add Header Matcher
+                  </button>
+                </div>
+                <div id="rule-header-match-rows" class="pair-editor-list"></div>
+              </div>
+              <span id="rule-match-error" class="field-error" role="alert"></span>
+            </fieldset>
+
+            <!-- Ordered Actions Fieldset -->
+            <fieldset id="rule-actions-fieldset" class="form-fieldset">
+              <legend>Ordered Modification Actions (Evaluated Top-to-Bottom) <span class="required-mark">*</span></legend>
+              <p class="field-hint">Add, remove, and reorder (↑ / ↓) actions. Supports query, header, cookie, JSON body, and URL-encoded form body mutations.</p>
+              <div id="rule-action-rows" class="rule-actions-list"></div>
+              <div class="row-actions" style="margin-block-top: 0.5rem;">
+                <button type="button" id="add-rule-action-btn" class="btn btn-secondary btn-sm">
+                  + Add Modification Action
+                </button>
+              </div>
+              <span id="rule-actions-error" class="field-error" role="alert"></span>
+            </fieldset>
+
+            <!-- Read-Only Save Payload Inspector (Rule 3) -->
+            <div class="detail-subsection">
+              <div class="export-label-row">
+                <label for="rule-payload-preview"><strong>Read-Only Rule Save Payload Inspector (JSON)</strong></label>
+                <span class="field-hint">Automatically synchronized with the structured form above.</span>
+              </div>
+              <pre tabindex="0" class="code-preview"><code id="rule-payload-preview">{}</code></pre>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" id="rule-submit-btn" class="btn btn-primary">
+                Save Rule
+              </button>
+              <button type="button" id="rule-preview-candidate-btn" class="btn btn-secondary">
+                Dry-Run Preview Candidate Rule
+              </button>
+              <button type="button" id="rule-cancel-edit-btn" class="btn btn-secondary">
+                Cancel / Reset Form
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <!-- Right Panel: Dry-Run Preview / Test Inspector -->
+        <section id="rule-preview-section" class="card" aria-labelledby="rule-preview-heading">
+          <div class="card-header">
+            <div>
+              <h2 id="rule-preview-heading">Rule Dry-Run Preview &amp; Test Inspector</h2>
+              <p class="card-subtitle">Test persisted rules or the current unsaved candidate rule against an inline request or a stored capture without sending traffic.</p>
+            </div>
+            <span id="preview-dry-run-banner" class="badge badge-warn">DRY-RUN PREVIEW ONLY (Does Not Save or Send Traffic)</span>
+          </div>
+
+          <div class="immutability-callout">
+            <strong>Non-Destructive Dry-Run Guarantee (Rule 5):</strong>
+            <span>Previewing rules never forwards traffic to upstream targets, never creates or mutates capture records, and never saves unsaved form edits.</span>
+          </div>
+
+          <fieldset class="form-fieldset">
+            <legend>Preview Input Source &amp; Rule Scope</legend>
+            <div class="radio-group" style="flex-direction: row; flex-wrap: wrap; gap: 1rem;">
+              <label class="radio-option" for="preview-source-inline">
+                <input type="radio" id="preview-source-inline" name="preview_source_mode" value="inline" checked>
+                <span>Inline Sample Request</span>
+              </label>
+              <label class="radio-option" for="preview-source-capture">
+                <input type="radio" id="preview-source-capture" name="preview_source_mode" value="capture">
+                <span>Stored Capture ID</span>
+              </label>
+            </div>
+
+            <div class="endpoint-grid" style="margin-block-start: 0.5rem;">
+              <label class="checkbox-inline" for="preview-include-candidate-checkbox">
+                <input type="checkbox" id="preview-include-candidate-checkbox" checked>
+                <span>Evaluate current form as candidate rule</span>
+              </label>
+              <label class="checkbox-inline" for="preview-include-disabled-checkbox">
+                <input type="checkbox" id="preview-include-disabled-checkbox">
+                <span>Include disabled rules</span>
+              </label>
+            </div>
+
+            <div class="form-group" style="margin-block-start: 0.4rem; margin-block-end: 0;">
+              <label for="preview-rule-ids-input">Filter Specific Persisted Rule IDs (optional, comma-separated)</label>
+              <input
+                type="text"
+                id="preview-rule-ids-input"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="Leave blank to evaluate all persisted rules (or candidate only)"
+              >
+            </div>
+          </fieldset>
+
+          <!-- Stored Capture Input Panel -->
+          <div id="preview-capture-panel" class="target-mode-panel" hidden>
+            <div class="form-group">
+              <label for="preview-capture-select">Select Stored Capture or Enter Capture ID <span class="required-mark">*</span></label>
+              <div class="endpoint-grid">
+                <select id="preview-capture-select" aria-label="Select a recent capture for rule preview">
+                  <option value="">-- Select from loaded captures --</option>
+                </select>
+                <input
+                  type="text"
+                  id="preview-capture-id-input"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  placeholder="Or enter capture ID..."
+                >
+              </div>
+            </div>
+          </div>
+
+          <!-- Inline Sample Request Input Panel -->
+          <div id="preview-inline-panel" class="target-mode-panel">
+            <div class="endpoint-grid">
+              <div class="form-group">
+                <label for="preview-inline-method">Method</label>
+                <select id="preview-inline-method">
+                  <option value="POST" selected>POST</option>
+                  <option value="GET">GET</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="DELETE">DELETE</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="preview-inline-scheme">Scheme</label>
+                <select id="preview-inline-scheme">
+                  <option value="https" selected>https</option>
+                  <option value="http">http</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="preview-inline-authority">Authority / Host</label>
+                <input
+                  type="text"
+                  id="preview-inline-authority"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  value="app-a.local.test:8443"
+                >
+              </div>
+            </div>
+
+            <div class="endpoint-grid">
+              <div class="form-group">
+                <label for="preview-inline-path">Decoded Path</label>
+                <input
+                  type="text"
+                  id="preview-inline-path"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  value="/v1/orders"
+                >
+              </div>
+              <div class="form-group">
+                <label for="preview-inline-route-id">Route ID (optional)</label>
+                <input
+                  type="text"
+                  id="preview-inline-route-id"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  placeholder="Auto-resolved from host if blank"
+                >
+              </div>
+              <div class="form-group">
+                <label for="preview-inline-content-type">Content-Type</label>
+                <input
+                  type="text"
+                  id="preview-inline-content-type"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  value="application/json"
+                >
+              </div>
+            </div>
+
+            <div class="endpoint-grid" style="margin-block-end: 0.75rem;">
+              <label class="checkbox-inline" for="preview-inline-websocket">
+                <input type="checkbox" id="preview-inline-websocket">
+                <span>Simulate WebSocket Handshake (<code>is_websocket</code>)</span>
+              </label>
+              <label class="checkbox-inline" for="preview-inline-streamed">
+                <input type="checkbox" id="preview-inline-streamed">
+                <span>Simulate Streamed Request (<code>is_streamed</code>)</span>
+              </label>
+            </div>
+
+            <div class="detail-subsection">
+              <div class="export-label-row">
+                <strong>Inline Ordered Query Parameters</strong>
+                <button type="button" id="add-preview-query-btn" class="btn btn-secondary btn-sm">
+                  + Add Query Pair
+                </button>
+              </div>
+              <div id="preview-inline-query-rows" class="pair-editor-list"></div>
+            </div>
+
+            <div class="detail-subsection">
+              <div class="export-label-row">
+                <strong>Inline Ordered Request Headers</strong>
+                <button type="button" id="add-preview-header-btn" class="btn btn-secondary btn-sm">
+                  + Add Header Pair
+                </button>
+              </div>
+              <div id="preview-inline-header-rows" class="pair-editor-list"></div>
+            </div>
+
+            <div class="detail-subsection">
+              <div class="export-label-row">
+                <strong>Inline Cookies (optional)</strong>
+                <button type="button" id="add-preview-cookie-btn" class="btn btn-secondary btn-sm">
+                  + Add Cookie Pair
+                </button>
+              </div>
+              <div id="preview-inline-cookie-rows" class="pair-editor-list"></div>
+            </div>
+
+            <div class="form-group">
+              <label for="preview-inline-body-mode">Inline Body Mode</label>
+              <select id="preview-inline-body-mode">
+                <option value="json" selected>JSON Text / Object (json)</option>
+                <option value="urlencoded_form">URL-Encoded Form Pairs (urlencoded_form)</option>
+                <option value="raw_text">Raw Text / Unsupported Body (raw_text)</option>
+                <option value="empty">Empty Body (empty)</option>
+              </select>
+            </div>
+
+            <div id="preview-inline-json-wrap" class="form-group">
+              <label for="preview-inline-json-textarea">Inline JSON Body Text</label>
+              <textarea id="preview-inline-json-textarea" rows="4" spellcheck="false" class="code-textarea">{"order":{"id":101,"debug":false},"items":[{"sku":"A1","qty":1}]}</textarea>
+            </div>
+
+            <div id="preview-inline-form-wrap" class="detail-subsection" hidden>
+              <div class="export-label-row">
+                <strong>Inline Ordered Form Fields</strong>
+                <button type="button" id="add-preview-form-btn" class="btn btn-secondary btn-sm">
+                  + Add Form Pair
+                </button>
+              </div>
+              <div id="preview-inline-form-rows" class="pair-editor-list"></div>
+            </div>
+
+            <div id="preview-inline-raw-wrap" class="form-group" hidden>
+              <label for="preview-inline-raw-textarea">Inline Raw Body Text</label>
+              <textarea id="preview-inline-raw-textarea" rows="3" spellcheck="false" class="code-textarea">raw body content</textarea>
+            </div>
+          </div>
+
+          <div class="form-actions" style="margin-block-bottom: 1rem;">
+            <button type="button" id="run-rule-preview-btn" class="btn btn-primary">
+              Run Dry-Run Preview
+            </button>
+          </div>
+
+          <div id="preview-error-box" class="apply-error-box" role="alert" data-error-code="" hidden>
+            <div class="apply-error-details">
+              <strong id="preview-error-code">Preview Error</strong>:
+              <span id="preview-error-message"></span>
+            </div>
+          </div>
+
+          <!-- Preview Results Container -->
+          <div id="preview-result-container" hidden>
+            <div id="preview-outcome-box" class="replayability-box" data-outcome="no_match" style="margin-block-top: 0.85rem;">
+              <div class="replayability-info">
+                <strong>Preview Evaluation Outcome:</strong>
+                <span id="preview-outcome-badge" class="badge badge-neutral">no_match</span>
+                <code id="preview-outcome-summary-text">matched=0, applied=0, skipped=0, failed=0</code>
+              </div>
+              <span class="badge badge-warn">DRY-RUN (Not Saved / Not Sent)</span>
+            </div>
+
+            <!-- Matched / Applied / Skipped / Failed Per-Rule Breakdown -->
+            <div class="detail-subsection">
+              <h3>Evaluated Rules Breakdown (Matched / Applied / Skipped / Failed)</h3>
+              <div tabindex="0" role="region" aria-label="Preview rule evaluation breakdown" class="table-wrapper compact-table">
+                <table id="preview-rules-table">
+                  <caption class="visually-hidden">Preview evaluation status and reasons for each rule</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Rule ID &amp; Name</th>
+                      <th scope="col">Priority</th>
+                      <th scope="col">Outcome</th>
+                      <th scope="col">Reason / Action Details</th>
+                    </tr>
+                  </thead>
+                  <tbody id="preview-rules-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Change Summary Table -->
+            <div class="detail-subsection">
+              <h3>Change Summary (<span id="preview-change-count">0</span> changes)</h3>
+              <div tabindex="0" role="region" aria-label="Preview change summary" class="table-wrapper compact-table">
+                <table id="preview-changes-table">
+                  <caption class="visually-hidden">Detailed before and after changes from dry-run preview</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Rule ID</th>
+                      <th scope="col">Action Type</th>
+                      <th scope="col">Key / Path</th>
+                      <th scope="col">Status &amp; Reason</th>
+                      <th scope="col">Before &rarr; After</th>
+                    </tr>
+                  </thead>
+                  <tbody id="preview-changes-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Before vs After Comparison -->
+            <div id="preview-before-after-box" class="wire-comparison-box">
+              <h3>Before vs. After Request State Comparison</h3>
+              <div class="preview-before-after-grid">
+                <div>
+                  <strong>Before (Original Input)</strong>
+                  <pre tabindex="0" class="code-preview"><code id="preview-before-json"></code></pre>
+                </div>
+                <div>
+                  <strong>After (Post-Rule Evaluation)</strong>
+                  <pre tabindex="0" class="code-preview"><code id="preview-after-json"></code></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
   </main>
 
   <!-- Native Modal Dialog: Copy Route (Requires new non-conflicting domain) -->
@@ -1189,6 +1939,109 @@
         </button>
         <button type="submit" id="replay-confirm-send-btn" class="btn btn-danger" value="confirm">
           Confirm &amp; Send Replay
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Native Modal Dialog: Copy Rule (AC-5) -->
+  <dialog id="copy-rule-dialog" aria-labelledby="copy-rule-dialog-title">
+    <h2 id="copy-rule-dialog-title">Copy Modification Rule</h2>
+    <p id="copy-rule-source-summary" class="dialog-summary"></p>
+    <form id="copy-rule-form" method="dialog" novalidate>
+      <input type="hidden" id="copy-source-rule-id" name="source_rule_id" value="">
+
+      <div class="form-group">
+        <label for="copy-new-rule-name">New Rule Name <span class="required-mark">*</span></label>
+        <input
+          type="text"
+          id="copy-new-rule-name"
+          name="name"
+          required
+          autofocus
+          placeholder="e.g. Copy of Order Debug Rule"
+          aria-describedby="copy-rule-name-error"
+        >
+        <span id="copy-rule-name-error" class="field-error" role="alert"></span>
+      </div>
+
+      <div class="form-group">
+        <label for="copy-new-rule-id">New Rule ID <span class="required-mark">*</span></label>
+        <input
+          type="text"
+          id="copy-new-rule-id"
+          name="rule_id"
+          required
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="e.g. rule:orders-debug-copy"
+          aria-describedby="copy-rule-id-hint copy-rule-id-error"
+        >
+        <span id="copy-rule-id-hint" class="field-hint">Must be a distinct rule ID so the source rule is not overwritten.</span>
+        <span id="copy-rule-id-error" class="field-error" role="alert"></span>
+      </div>
+
+      <div class="form-group">
+        <label for="copy-new-rule-priority">Priority</label>
+        <input
+          type="text"
+          id="copy-new-rule-priority"
+          name="priority"
+          inputmode="numeric"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          value="100"
+        >
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" id="copy-rule-cancel-btn" class="btn btn-secondary" value="cancel">
+          Cancel
+        </button>
+        <button type="submit" id="copy-rule-confirm-btn" class="btn btn-primary" value="confirm">
+          Copy Rule
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Native Modal Dialog: Delete Rule Confirmation (Rule 4, AC-8) -->
+  <dialog id="delete-rule-dialog" aria-labelledby="delete-rule-dialog-title">
+    <h2 id="delete-rule-dialog-title">Confirm Rule Deletion</h2>
+    <p class="dialog-summary">
+      Are you sure you want to delete modification rule
+      <strong id="delete-target-rule-id"></strong>
+      (<span id="delete-target-rule-name"></span>)?
+    </p>
+    <p class="field-hint">This rule will immediately stop matching subsequent requests.</p>
+    <form id="delete-rule-form" method="dialog">
+      <input type="hidden" id="delete-rule-id-input" name="rule_id" value="">
+      <div class="dialog-actions">
+        <button type="button" id="delete-rule-cancel-btn" class="btn btn-secondary" value="cancel" autofocus>
+          Cancel
+        </button>
+        <button type="submit" id="delete-rule-confirm-btn" class="btn btn-danger" value="delete">
+          Delete Rule
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Native Modal Dialog: Discard Unsaved Rule Edits Confirmation (Rule 4, AC-8) -->
+  <dialog id="discard-rule-edits-dialog" aria-labelledby="discard-rule-edits-title">
+    <h2 id="discard-rule-edits-title">Discard Unsaved Rule Edits?</h2>
+    <p class="dialog-summary">
+      You have unsaved changes in the modification rule editor. Discarding will lose your current edits.
+    </p>
+    <form id="discard-rule-edits-form" method="dialog">
+      <div class="dialog-actions">
+        <button type="button" id="discard-rule-cancel-btn" class="btn btn-secondary" value="cancel" autofocus>
+          Keep Editing (Cancel)
+        </button>
+        <button type="submit" id="discard-rule-confirm-btn" class="btn btn-danger" value="discard">
+          Discard Unsaved Edits
         </button>
       </div>
     </form>

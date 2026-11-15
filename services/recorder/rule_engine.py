@@ -115,6 +115,15 @@ class RuleNotFoundError(KeyError):
         self.rule_id = rule_id
 
 
+class RulesUnavailableError(RuntimeError):
+    """Raised when the modification rules store is temporarily unavailable."""
+
+    def __init__(self, message: str = "Modification rules store is temporarily unavailable.") -> None:
+        super().__init__(message)
+        self.code = "rules_unavailable"
+
+
+
 def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -195,7 +204,19 @@ def _normalize_pair_matchers(raw_list: Any, field_name: str) -> list[dict[str, A
                 )
             normalized.append({"name": name, "value": str(item[1])})
         elif isinstance(item, dict):
-            allowed = {"name", "key", "value", "value_regex", "index", "absent", "present"}
+            allowed = {
+                "name",
+                "key",
+                "value",
+                "equals",
+                "value_regex",
+                "regex",
+                "prefix",
+                "contains",
+                "index",
+                "absent",
+                "present",
+            }
             unknown = set(item.keys()) - allowed
             if unknown:
                 raise RuleValidationError(
@@ -209,29 +230,34 @@ def _normalize_pair_matchers(raw_list: Any, field_name: str) -> list[dict[str, A
                     code="invalid_match_schema",
                 )
             entry: dict[str, Any] = {"name": raw_name.strip()}
-            if "value" in item and item["value"] is not None:
-                if not isinstance(item["value"], (str, int, float, bool)):
+            val_in = item.get("value", item.get("equals"))
+            if val_in is not None:
+                if not isinstance(val_in, (str, int, float, bool)):
                     raise RuleValidationError(
                         f"match.{field_name} value must be a scalar string",
                         code="invalid_match_schema",
                     )
-                entry["value"] = str(item["value"])
-            if "value_regex" in item and item["value_regex"] is not None:
-                pat = item["value_regex"]
-                if not isinstance(pat, str) or not pat:
+                entry["value"] = str(val_in)
+            pat_in = item.get("value_regex", item.get("regex"))
+            if pat_in is None and item.get("prefix") is not None:
+                pat_in = f"^{re.escape(str(item['prefix']))}"
+            elif pat_in is None and item.get("contains") is not None:
+                pat_in = re.escape(str(item["contains"]))
+            if pat_in is not None:
+                if not isinstance(pat_in, str) or not pat_in:
                     raise RuleValidationError(
                         f"match.{field_name}.value_regex must be a non-empty string",
                         code="invalid_regex",
                     )
                 try:
-                    re.compile(pat)
+                    re.compile(pat_in)
                 except re.error as exc:
                     raise RuleValidationError(
-                        f"Invalid regex in match.{field_name}.value_regex {pat!r}: {exc}",
+                        f"Invalid regex in match.{field_name}.value_regex {pat_in!r}: {exc}",
                         code="invalid_regex",
-                        details={"pattern": pat, "error": str(exc)},
+                        details={"pattern": pat_in, "error": str(exc)},
                     ) from exc
-                entry["value_regex"] = pat
+                entry["value_regex"] = pat_in
             if "index" in item and item["index"] is not None:
                 if isinstance(item["index"], bool):
                     raise RuleValidationError(
@@ -411,8 +437,27 @@ def _normalize_single_action(raw: Any, default_target: str | None = None) -> dic
     raw_target = str(raw.get("target") or raw.get("type") or default_target or "").strip().lower()
     raw_op = str(raw.get("op") or raw.get("action") or "").strip().lower()
 
-    # Support combined shorthand like target="query_set" or op="header_add"
+    # Support combined shorthand like target="query_set", op="header_add", or type="set_header" / "add_query_param"
+    shorthand_type_map = {
+        "set_header": ("header", "set"),
+        "add_header": ("header", "add"),
+        "remove_header": ("header", "remove"),
+        "set_query_param": ("query", "set"),
+        "add_query_param": ("query", "add"),
+        "remove_query_param": ("query", "remove"),
+        "set_cookie": ("cookie", "set"),
+        "add_cookie": ("cookie", "add"),
+        "remove_cookie": ("cookie", "remove"),
+        "set_json_field": ("json", "set"),
+        "remove_json_field": ("json", "remove"),
+        "set_form_field": ("form", "set"),
+        "add_form_field": ("form", "add"),
+        "remove_form_field": ("form", "remove"),
+    }
     for candidate in (raw_target, raw_op):
+        if candidate in shorthand_type_map:
+            raw_target, raw_op = shorthand_type_map[candidate]
+            break
         if "_" in candidate and candidate not in ("set_at", "remove_at"):
             prefix, suffix = candidate.split("_", 1)
             if prefix in ("query", "header", "headers", "cookie", "cookies", "json", "form"):
@@ -771,6 +816,20 @@ class RuleEngineManager:
 
     def __init__(self, store: CaptureIndexStore) -> None:
         self.store = store
+        self.simulate_unavailable: bool = False
+
+    def _ensure_available(self) -> None:
+        if self.simulate_unavailable:
+            raise RulesUnavailableError(
+                "Modification rules API is temporarily unavailable. Routes, Docker discovery, Requests, and Replay remain operational."
+            )
+
+    def set_simulate_unavailable(self, flag: bool) -> dict[str, Any]:
+        self.simulate_unavailable = bool(flag)
+        return {
+            "simulate_unavailable": self.simulate_unavailable,
+            "available": not self.simulate_unavailable,
+        }
 
     def _row_to_rule_dict(self, row: Any) -> dict[str, Any]:
         return {
@@ -787,6 +846,7 @@ class RuleEngineManager:
         }
 
     def list_rules(self, *, enabled: bool | None = None) -> dict[str, Any]:
+        self._ensure_available()
         self.store.ensure_schema()
         with self.store._connect() as conn:
             if enabled is None:
@@ -819,6 +879,7 @@ class RuleEngineManager:
         }
 
     def get_rule(self, rule_id: str) -> dict[str, Any]:
+        self._ensure_available()
         self.store.ensure_schema()
         clean_id = rule_id.strip()
         with self.store._connect() as conn:
@@ -843,6 +904,7 @@ class RuleEngineManager:
         priority: int | None = None,
         copied_from_rule_id: str | None = None,
     ) -> dict[str, Any]:
+        self._ensure_available()
         self.store.ensure_schema()
         if payload is None:
             payload = {}
@@ -941,6 +1003,7 @@ class RuleEngineManager:
         match: dict[str, Any] | None = None,
         actions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        self._ensure_available()
         self.store.ensure_schema()
         if updates is None:
             updates = {}
@@ -1037,6 +1100,7 @@ class RuleEngineManager:
         return self.update_rule(rule_id, {"enabled": bool(enabled)})
 
     def delete_rule(self, rule_id: str) -> dict[str, Any]:
+        self._ensure_available()
         self.store.ensure_schema()
         clean_id = rule_id.strip()
         with self.store._connect() as conn:
@@ -1170,6 +1234,22 @@ class RuleEngineManager:
         orig_body_bytes = raw_body or b""
         orig_body_sha256 = hashlib.sha256(orig_body_bytes).hexdigest()
 
+        orig_body_text: str | None = None
+        orig_json_val: Any = None
+        orig_form_val: list[list[str]] | None = None
+        try:
+            orig_body_text = orig_body_bytes.decode("utf-8")
+            orig_ct_l = (orig_content_type or "").lower()
+            if "application/json" in orig_ct_l or orig_ct_l.endswith("+json"):
+                orig_json_val = json.loads(orig_body_text)
+            elif "application/x-www-form-urlencoded" in orig_ct_l and orig_body_text:
+                orig_form_val = [
+                    [k, v]
+                    for k, v in parse_qsl(orig_body_text, keep_blank_values=True)
+                ]
+        except Exception:
+            pass
+
         before_summary = {
             "route_id": route_id,
             "method": method.upper(),
@@ -1185,6 +1265,10 @@ class RuleEngineManager:
             "content_type": orig_content_type,
             "body_size": len(orig_body_bytes),
             "body_sha256": orig_body_sha256,
+            "body_text": orig_body_text,
+            "json_body": orig_json_val,
+            "json_value": orig_json_val,
+            "form_fields": orig_form_val,
         }
 
         # Working state updated sequentially by each applied rule (Rule 8)
@@ -1770,6 +1854,7 @@ class RuleEngineManager:
         """Dry-run preview against either a stored capture (`capture_id`) or an inline `request`
         without sending traffic to any target or creating captures (Rule 3, AC-11).
         """
+        self._ensure_available()
         self.store.ensure_schema()
         if payload is None:
             payload = {}
@@ -1888,7 +1973,7 @@ class RuleEngineManager:
         inc_dis = bool(payload.get("include_disabled", False))
         rules_override = payload.get("rules")
         filter_rule_ids = payload.get("rule_ids")
-        cand_rule = payload.get("candidate_rule")
+        cand_rule = payload.get("candidate_rule") or payload.get("rule")
 
         if rules_override is None and (filter_rule_ids or cand_rule is not None):
             base_items = self.list_rules(enabled=None if inc_dis else True)["items"]
@@ -1935,6 +2020,7 @@ class RuleEngineManager:
         modified_request = {
             **eval_meta["after_summary"],
             "body_text": body_text,
+            "json_body": json_val,
             "json_value": json_val,
             "form_fields": form_val,
         }
@@ -1956,8 +2042,11 @@ class RuleEngineManager:
             "change_count": eval_meta["change_count"],
             "change_summary": eval_meta["change_summary"],
             "rules": eval_meta["rules"],
+            "rule_results": eval_meta["rules"],
             "before_summary": eval_meta["before_summary"],
             "after_summary": eval_meta["after_summary"],
+            "before": eval_meta["before_summary"],
+            "after": modified_request,
             "rule_evaluation": eval_meta,
             "modified_request": modified_request,
             "modified_body_preview": {

@@ -23,6 +23,7 @@ test:
 	./tests/integration/test_request_draft_replay.sh
 	./tests/integration/test_web_request_console.sh
 	./tests/integration/test_modification_rules.sh
+	./tests/integration/test_web_rules_console.sh
 
 clean:
 	./scripts/down.sh
