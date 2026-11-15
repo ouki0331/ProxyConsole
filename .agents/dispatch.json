@@ -1,19 +1,19 @@
 {
   "protocol_version": 1,
-  "dispatch_id": 15,
-  "issued_at": "2026-11-15T20:29:42+09:00",
+  "dispatch_id": 16,
+  "issued_at": "2026-11-15T21:36:53+09:00",
   "issued_by": "orchestrator",
   "recipient": "implementer",
   "command": "execute_task",
-  "task_id": "DEV-050",
-  "task_file": "docs/tasks/DEV-050.md",
-  "base_commit": "dfed526",
+  "task_id": "DEV-060",
+  "task_file": "docs/tasks/DEV-060.md",
+  "base_commit": "d290465",
   "previous_task": {
-    "task_id": "DEV-042",
-    "decision": "approved",
-    "review_file": "docs/reviews/DEV-042-review-002.md"
+    "task_id": "DEV-050",
+    "decision": "deferred_by_product_scope",
+    "review_file": null
   },
-  "required_action": "Pull origin/main, acknowledge dispatch 15, execute DEV-050 as an evidence-based assessment without deploying to a company environment or inventing authentication policy, push artifacts and verification evidence, then wait for review.",
+  "required_action": "Pull origin/main, acknowledge dispatch 16, read docs/product/PRODUCT_MAP.md and docs/tasks/DEV-060.md, implement English/Japanese localization, form-free Overview, and Alt+1..5 workspace switching without adding company-sharing or multi-user features, run the full regression and browser E2E evidence, push, then wait for review.",
   "state": "assigned"
 }
 

@@ -1,8 +1,8 @@
 # ProxyConsole
 
-ProxyConsole 是一个面向 WSL/Docker 本地环境的可观测反向代理管理项目。长期目标是统一接管 HTTP/HTTPS 入口、按域名路由到容器，并在不破坏后续能力的前提下保存请求，逐步增加查询、编辑、重放、规则修改和本地通知。
+ProxyConsole 是一个面向单人 WSL/Docker 本地开发环境的聚合控制台。它统一接管 HTTP/HTTPS 入口、按域名路由到容器、保存与重放请求、管理修改规则和本地通知，并逐步聚合本机项目、数据库状态与容器日志。
 
-当前仓库处于规划与技术验证阶段，不应视为可用于公司环境的成品。
+P1～P5 的本地代理、捕获、路由管理、重放、规则和通知功能已经实现并通过独立复审。产品保持 localhost 单人使用，不以公司共享、多用户或公开部署为目标。
 
 ## 当前工作方式
 
@@ -18,6 +18,7 @@ ProxyConsole 是一个面向 WSL/Docker 本地环境的可观测反向代理管�
 - [开发总计划](docs/development/PLAN.md)
 - [顺序执行、轮询与审查协议](docs/development/WORKFLOW.md)
 - [当前状态](docs/development/STATUS.md)
+- [产品能力与范围](docs/product/PRODUCT_MAP.md)
 - [仓库目录规划](docs/architecture/REPOSITORY_LAYOUT.md)
 - [请求记录契约](docs/architecture/CAPTURE_CONTRACT.md)
 - [首个执行任务](docs/tasks/DEV-001.md)
@@ -25,4 +26,4 @@ ProxyConsole 是一个面向 WSL/Docker 本地环境的可观测反向代理管�
 
 ## 当前下一步
 
-`DEV-040`：实现持久化的自动请求修改规则，对匹配的未来请求修改 query、header、cookie、JSON 或 form，并保留可追踪的应用结果。任务通过 Git mailbox 自动派发，不需要用户转发提示词。
+`DEV-060`：增加英语 / 日语界面、无表单的统计 Overview，以及既有 workspace 的快捷键切换。任务通过 Git mailbox 自动派发，不需要用户转发提示词。

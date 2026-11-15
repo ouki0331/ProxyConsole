@@ -1,16 +1,16 @@
 # Project status
 
 Updated: 2026-11-15
-Phase: P6
-Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 pending
-Active task: DEV-050
-Task status: Ready for review
-Owner: orchestrator
+Phase: P7
+Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 deferred / G7 pending
+Active task: DEV-060
+Task status: In progress
+Owner: implementer
 Last verified commit: `8a84edc` (DEV-042 approved by independent review 002; Review 001 findings fixed and all 12 suites verified)
 Last substantive remote progress: `a4814f6` (DEV-050 company-environment readiness assessment, local runbook, and backup/restore verification script implemented and verified)
-Task definition baseline: `dfed526`
-Dispatched at: 2026-11-15 20:29 JST
-Mailbox dispatch: `15` (`.agents/dispatch.json`)
+Task definition baseline: `d290465`
+Dispatched at: 2026-11-15 21:36 JST
+Mailbox dispatch: `16` (`.agents/dispatch.json`)
 
 ## Current summary
 
@@ -28,12 +28,14 @@ Mailbox dispatch: `15` (`.agents/dispatch.json`)
 - DEV-040 は独立機能 review 002 に合格し、`Done` となった。
 - DEV-041 は独立機能 review 001 に合格し、`Done` となった。
 - DEV-042 は独立機能 review 002 に合格し、`Done`、G5 passed となった。
-- DEV-050 Company-environment readiness assessment を実施し、`docs/operations/COMPANY_READINESS.md`、`docs/operations/LOCAL_RUNBOOK.md`、`scripts/check-company-readiness.sh` を作成し、DEV-001〜DEV-042 の全12統合テストおよび Readiness / バックアップ・リストア / Disk-full 検証の成功を確認して `Ready for review` とした。
+- DEV-050 の assessment / runbook / backup evidence は実装 Agent が完成したが、単一利用者・localhost 専用へ製品範囲を固定したため独立 review と会社共有向け follow-up を `Deferred` とした。成果は削除せず参考資料として保持する。
+- `docs/product/PRODUCT_MAP.md` で個人用 local development console の製品境界を固定した。
+- DEV-060 を dispatch 16 で開始し、英語 / 日本語、フォームのない Overview、既存 workspace の `Alt+1`〜`Alt+5` shortcut を実装する。
 
 ## Next transition
 
-orchestrator が DEV-050 の独立機能 review を実施し、問題がなければ `Done` および `G6 passed` とする。
+implementer が dispatch 16 を受領し、DEV-060 を実装・検証して `Ready for review` にする。
 
 ## Blocking items
 
-- なし。会社固有ポリシーが必要な項目は DEV-050 で `company_decision_required` として分類済み。
+- なし。Runtime Projects / Logs は DEV-060 合格後に DEV-061 / DEV-062 として順次詳細化する。

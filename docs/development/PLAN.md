@@ -1,13 +1,13 @@
 # ProxyConsole 開発計画
 
-更新日: 2026-11-06  
-計画状態: Active  
-現在フェーズ: P6 — 会社環境候補の再評価
-実装状態: G5 passed / DEV-042 approved / DEV-050 in progress
+更新日: 2026-11-15
+計画状態: Active
+現在フェーズ: P7 — Personal local dashboard & observability
+実装状態: G5 passed / P6 deferred / DEV-060 in progress
 
 ## 1. バージョン目標
 
-最初のローカル版の終了条件は、次の一連の操作を利用者が確認できることである。
+個人用ローカル版の終了条件は、次の一連の操作を利用者が確認できることである。
 
 1. WSL/Docker 上の一つの HTTP/HTTPS 入口へ複数ドメインでアクセスできる。
 2. 各ドメインが指定されたコンテナまたは手動指定先へ転送される。
@@ -15,19 +15,21 @@
 4. 管理画面からルートの作成、複製、無効化、Docker ターゲット選択ができる。
 5. 保存したリクエストを検索、閲覧し、後続版では編集、リプレイ、cURL/fetch 出力ができる。
 6. エラー条件を集約し、同一障害を連続通知しないローカル通知ができる。
+7. 英語 / 日本語を切り替え、フォームのない Overview から全体状態を確認して keyboard で各 workspace へ移動できる。
+8. Docker Compose project / container、ローカル DB 状態、関連ログを個別 CLI や container path を探さず確認できる。
 
 ## 2. 現在の前提
 
 - リポジトリは空の状態から開始する。
 - 開発は `main` 一本で順次行い、並列作業はしない。
-- 最初はローカル検証用であり、会社環境への導入は P6 の再評価後に限る。
+- 製品は単一利用者の localhost 開発ツールとして継続し、会社共有環境への導入は現在のロードマップから延期する。
 - Nginx を TLS 終端およびホストルーティングの基盤として維持する。
 - リプレイ UI は初期フェーズに含めないが、記録形式は後の編集・リプレイを妨げてはならない。
-- 管理 UI は認証を初期範囲に含めない代わりに、localhost 以外へ公開しない。
+- 管理 UI は login / multi-user を持たず、localhost 以外へ公開しない。
 
-### ローカル版の優先順位
+### 個人用ローカル版の優先順位
 
-P1 から P5 までは機能完成を優先する。情報漏洩フィルター、権限分離、Docker Socket の最小権限化、公開環境向け hardening は現在のフェーズゲートに使用せず、P6 でまとめて評価する。ただし、データ破壊、誤配送、既存機能停止など機能結果に直結する問題は現在のレビュー対象に含める。
+P1 から P5 の proxy / capture / replay / rule / notification を維持し、P7 では個人が日常的に状態を把握する console experience と local observability を優先する。情報漏洩フィルター、権限分離、公開環境向け hardening は localhost 前提を変更しない限り blocking gate にしない。ただし、データ破壊、誤配送、既存機能停止など機能結果に直結する問題はレビュー対象に含める。
 
 ## 3. 明示的な初期除外
 
@@ -37,6 +39,8 @@ P1 から P5 までは機能完成を優先する。情報漏洩フィルター�
 - マルチユーザー認証と権限管理
 - 公開インターネット上の管理画面
 - 会社環境への自動展開
+- 会社共有 host、SSO、RBAC、multi-user operation
+- 汎用 SQL client と任意 host log file の自動探索
 
 ## 4. フェーズとゲート
 
@@ -49,6 +53,7 @@ P1 から P5 までは機能完成を優先する。情報漏洩フィルター�
 | P4 | 保存済みリクエストを編集、リプレイ、出力できる | DEV-030 系 | G4 |
 | P5 | 自動変更ルールと集約通知が使える | DEV-040 系 | G5 |
 | P6 | 会社環境候補として安全性と運用性を再評価できる | DEV-050 系 | G6 |
+| P7 | 日英 UI、状態 Overview、local project / DB / log 集約を個人利用できる | DEV-060〜DEV-062 | G7 |
 
 ## 5. フェーズ詳細
 
@@ -168,7 +173,35 @@ G4 不合格時:
 
 ### P6 — 会社環境候補の再評価
 
-会社環境へ持ち込む前に、機密情報、証明書、Docker 権限、負荷、バックアップ、監査、会社ポリシーを別途評価する。ローカル版の合格を会社利用の承認とみなさない。
+DEV-050 の assessment / runbook / backup evidence は remote に保持する。2026-11-15 の product scope decision により会社共有・multi-user 対応を延期したため、独立 review と G6 判定、および会社向け hardening follow-up は `Deferred` とする。
+
+### P7 — Personal local dashboard & observability
+
+DEV-060:
+
+- 英語 / 日本語の UI と永続 language selection。
+- フォームを持たない Overview dashboard。
+- 既存 workspace の tab 分離と `Alt+1`〜`Alt+5` shortcut。
+
+DEV-061（DEV-060 合格後に詳細化）:
+
+- Docker Compose project / container の running / stopped / health / port 集約。
+- ProxyConsole SQLite と Docker 上の DB container の local status summary。
+- Runtime Projects workspace と `Alt+6`。
+
+DEV-062（DEV-061 合格後に詳細化）:
+
+- Docker API と既存 ProxyConsole / Nginx log の aggregation、tail、search、severity filter。
+- Logs workspace と `Alt+7`。
+- 任意 host file discovery、external log service、multi-user audit は含めない。
+
+G7 合格条件:
+
+- 日本語 / 英語で Overview と既存 workspace の代表 flow を完了できる。
+- Overview に設定フォームがなく、統計から詳細 workspace へ遷移できる。
+- shortcut が入力操作を破壊せず、reload 後に language / workspace を復元する。
+- Docker project / container / DB status と local logs を個別 container shell に入らず確認できる。
+- P1〜P5 の全機能回帰が成功する。
 
 ## 6. タスクまたはプロジェクトを停止する条件
 
@@ -199,5 +232,5 @@ G4 不合格時:
 
 ## 7. 次に開始できるタスク
 
-`DEV-050`。DEV-042 が独立レビューで合格し G5 を通過したため、会社環境候補としての trust boundary、data risk、backup/restore、運用性を評価できる。
+`DEV-060`。P1〜P5 の data / API / workspace が揃っているため、backend business logic を変えずに日英 localization、統計 Overview、既存 workspace shortcut を縦に完成できる。
 
