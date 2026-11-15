@@ -3,7 +3,7 @@
 更新日: 2026-11-06  
 計画状態: Active  
 現在フェーズ: P5 — 変更ルールと通知
-実装状態: G4 passed / DEV-040 approved / DEV-041 in progress
+実装状態: G4 passed / DEV-041 approved / DEV-042 in progress
 
 ## 1. バージョン目標
 
@@ -199,5 +199,5 @@ G4 不合格時:
 
 ## 7. 次に開始できるタスク
 
-`DEV-041`。DEV-040 が独立レビューで合格したため、automatic modification rule の Web management console を開始できる。
+`DEV-042`。DEV-041 が独立レビューで合格したため、aggregated local notifications と live event feed を開始できる。
 
