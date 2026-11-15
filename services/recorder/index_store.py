@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import time
 from typing import Any, Iterator
 
 from docker_discovery import DockerDiscoveryService
@@ -1348,6 +1349,121 @@ class CaptureIndexStore:
             "import_errors_count": len(err_rows),
             "import_errors": [dict(r) for r in err_rows],
             "migrations": [dict(m) for m in migrations],
+        }
+
+    def get_overview_summary(self) -> dict[str, Any]:
+        self.ensure_schema()
+        now_us = int(time.time() * 1_000_000)
+        day_ago_us = now_us - (24 * 3600 * 1_000_000)
+        with self._connect() as conn:
+            total_indexed = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM captures_index"
+            ).fetchone()["cnt"]
+            captures_24h = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM captures_index WHERE captured_at_unix_us >= ?",
+                (day_ago_us,),
+            ).fetchone()["cnt"]
+            last_cap = conn.execute(
+                "SELECT captured_at FROM captures_index ORDER BY captured_at_unix_us DESC LIMIT 1"
+            ).fetchone()
+            last_capture_time = last_cap["captured_at"] if last_cap else None
+
+            quick_check_row = conn.execute("PRAGMA quick_check;").fetchone()
+            sqlite_integrity = (
+                quick_check_row[0] if quick_check_row else "ok"
+            )
+
+        # Storage / retention status
+        try:
+            ret_status = self.get_retention_status(runs_limit=1)
+        except Exception:
+            ret_status = {}
+
+        # Route status
+        try:
+            routes_list = self.routes.list_routes()
+            enabled_routes = sum(1 for r in routes_list if r.get("enabled"))
+            apply_status = self.routes.get_routes_status(runs_limit=1)
+        except Exception:
+            routes_list = []
+            enabled_routes = 0
+            apply_status = {"in_sync": True, "status": "applied", "generation": 1}
+
+        # Docker discovery status
+        try:
+            disc_status = self.discovery.get_status(refresh=False)
+            cont_res = self.discovery.list_containers(include_self=False)
+            containers = cont_res.get("containers", [])
+            running_containers = sum(1 for c in containers if c.get("state") == "running")
+            stopped_containers = sum(1 for c in containers if c.get("state") != "running")
+            docker_info = {
+                "available": disc_status.get("available", False),
+                "error": disc_status.get("last_error"),
+                "total_containers": len(containers),
+                "running_containers": running_containers,
+                "stopped_containers": stopped_containers,
+            }
+        except Exception as e:
+            docker_info = {
+                "available": False,
+                "error": str(e),
+                "total_containers": 0,
+                "running_containers": 0,
+                "stopped_containers": 0,
+            }
+
+        # Notifications status
+        try:
+            notif_status = self.notifications.get_status()
+            inc_res = self.notifications.list_incidents(status=None, limit=100)
+            notif_incidents = inc_res.get("incidents", [])
+            unack_count = sum(1 for inc in notif_incidents if not inc.get("acknowledged"))
+            notifications_info = {
+                "available": notif_status.get("available", True),
+                "unacknowledged_count": unack_count,
+                "total_incidents": len(notif_incidents),
+            }
+        except Exception as e:
+            notifications_info = {
+                "available": False,
+                "error": str(e),
+                "unacknowledged_count": 0,
+                "total_incidents": 0,
+            }
+
+        return {
+            "status": "ok",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "proxy": {
+                "status": "healthy",
+            },
+            "routes": {
+                "total": len(routes_list),
+                "enabled": enabled_routes,
+                "in_sync": apply_status.get("in_sync", True),
+                "apply_status": apply_status.get("status", "applied"),
+                "generation": apply_status.get("generation", 1),
+                "active_config_sha256": apply_status.get("active_config_sha256", ""),
+                "last_apply_time": apply_status.get("last_apply_time"),
+            },
+            "docker": docker_info,
+            "captures": {
+                "total": total_indexed,
+                "last_24h": captures_24h,
+                "last_capture_time": last_capture_time,
+            },
+            "storage": {
+                "storage_bytes": ret_status.get("storage_bytes", 0),
+                "soft_limit_bytes": ret_status.get("soft_limit_bytes", 0),
+                "hard_limit_bytes": ret_status.get("hard_limit_bytes", 0),
+                "status": ret_status.get("status", "normal"),
+            },
+            "incidents": notifications_info,
+            "sqlite": {
+                "integrity": sqlite_integrity,
+                "db_path": str(self.db_path),
+                "schema_version": INDEX_SCHEMA_VERSION,
+            },
         }
 
     def query_captures(

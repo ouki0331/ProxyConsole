@@ -2,7 +2,474 @@ const DOMAIN_RE =
   /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 const HOST_RE = /^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
 
+// ================================================================
+// DEV-060: Internationalization (i18n) Catalog & Helpers
+// ================================================================
+const I18N_CATALOG = {
+  en: {
+    app: {
+      title: "ProxyConsole — Route & Docker Target Management",
+      heading: "ProxyConsole",
+      subtitle: "Localhost Route, Docker Target, Request Viewer & Replay Console",
+    },
+    header: {
+      subtitle: "Localhost Route, Docker Target, Request Viewer & Replay Console",
+    },
+    nav: {
+      overview: "Overview",
+      routes: "Routes & Docker",
+      requests: "Requests & Replay",
+      rules: "Modification Rules",
+      notifications: "Notifications",
+      all: "All Workspaces",
+    },
+    common: {
+      refresh: "Refresh State",
+      ready: "Ready",
+      healthy: "Healthy",
+      degraded: "Degraded",
+      down: "Down",
+      available: "Available",
+      unavailable: "Unavailable",
+      retry: "Retry",
+      loading: "Loading...",
+      checking: "Checking...",
+      enabled: "Enabled",
+      disabled: "Disabled",
+      status: "Status",
+      actions: "Actions",
+      delete: "Delete",
+      cancel: "Cancel",
+      save: "Save",
+      copy: "Copy",
+      close: "Close",
+      apply: "Apply",
+      applied: "applied",
+      in_sync: "In Sync",
+      out_of_sync: "Out of Sync",
+      view: "View",
+      edit: "Edit",
+      language: "Language",
+    },
+    feedback: {
+      ready_title: "Ready",
+      ready_msg: "Loaded route and Docker discovery state from local control API.",
+    },
+    status: {
+      healthy: "Healthy",
+      checking: "Checking...",
+      applied: "applied",
+      in_sync: "In Sync",
+      out_of_sync: "Out of Sync",
+      available: "Available",
+      unavailable: "Unavailable",
+      normal: "normal",
+      warning: "warning",
+      enforcing: "enforcing",
+      complete: "complete",
+      metadata_only: "metadata only",
+      replayable: "Replayable",
+      non_replayable: "Non-replayable",
+      critical: "critical",
+      error: "error",
+      info: "info",
+    },
+    overview: {
+      heading: "System Overview",
+      subtitle: "Form-free operational status of proxy routing, Docker services, capture activity, storage, and incidents.",
+      last_refresh: "Last Refreshed:",
+      card_health_title: "Proxy & Control Health",
+      health_desc: "TLS Edge, Mitmproxy Inspector, Nginx Router, and Control API are responsive.",
+      view_routes_deep: "View Routes & Router Status →",
+      card_routes_title: "Domain Routes & Sync",
+      routes_active_label: "Enabled / Total domain routes.",
+      manage_routes_deep: "Manage Routes & Targets →",
+      card_docker_title: "Docker Target Containers",
+      view_docker_deep: "View Docker Containers →",
+      card_captures_title: "HTTP Captures",
+      captures_in_24h: "Captures recorded in last 24h",
+      total_indexed: "total indexed",
+      view_captures_deep: "Explore Requests & Replay →",
+      card_storage_title: "Storage & Retention",
+      storage_limits_label: "Limits:",
+      view_retention_deep: "View Storage Details →",
+      card_incidents_title: "Incident Notifications",
+      incidents_clear: "No unacknowledged system incidents.",
+      view_notifications_deep: "View Incident Notifications →",
+      card_sqlite_title: "SQLite Health",
+      sqlite_wal: "WAL mode active, schema up to date.",
+      view_db_deep: "Check Index Status →",
+      card_rules_title: "Modification Rules",
+      rules_desc: "Live request & header rewrite rules applied to proxy traffic.",
+      view_rules_deep: "Manage Modification Rules →",
+    },
+    routes: {
+      apply_heading: "Nginx Router Apply Status",
+      routes_heading: "Domain Routes",
+      routes_subtitle: "Host header routing rules persisted in SQLite and applied atomically to internal Nginx router.",
+      new_route_btn: "+ New Route",
+      empty_state: "No domain routes are currently registered. Create a route using the form.",
+      th_domain: "Domain",
+      th_enabled: "Enabled",
+      th_upstream: "Upstream",
+      th_target_type: "Target Type",
+      th_target_state: "Target State",
+      th_apply_status: "Apply Status",
+      th_actions: "Actions",
+      docker_heading: "Docker Containers & Port Candidates",
+      docker_subtitle: "Discovered via control-api Docker Engine socket. Select a running port candidate to populate the route form.",
+      refresh_docker_btn: "Refresh Docker",
+      show_system_containers: "Show ProxyConsole system containers (read-only)",
+      docker_empty: "No Docker containers discovered on local Docker daemon.",
+      th_service: "Service / Name",
+      th_container_id: "Container ID",
+      th_state: "State",
+      th_network: "Network",
+      th_target_id: "Target ID",
+      th_port_candidate: "Port Candidate",
+    },
+    requests: {
+      heading: "Recorded HTTP Requests",
+      subtitle: "Inspected and persisted captures. Select any request to inspect details, export cURL/fetch, or create a replay draft.",
+      filter_heading: "Filter & Search Captures",
+      reset_filters_btn: "Reset Filters",
+      th_time: "Time",
+      th_method: "Method",
+      th_host: "Host",
+      th_path: "Path",
+      th_status: "Status",
+      th_capture_status: "Capture",
+      th_replayable: "Replay",
+      th_actions: "Actions",
+      empty_state: "No captured HTTP requests found matching criteria.",
+      detail_heading: "Capture Details & Inspection",
+      detail_empty: "Select a request from the list to view its complete headers, body, replayability, and export options.",
+      draft_editor_heading: "Request Draft & Replay Editor",
+      send_replay_btn: "Send Replay Now",
+      saved_drafts_heading: "Saved Drafts",
+    },
+    rules: {
+      heading: "Modification Rules",
+      subtitle: "Ordered request and header mutation rules executed in Mitmproxy inspector before target forwarding.",
+      new_rule_btn: "+ New Rule",
+      empty_state: "No modification rules configured. Click + New Rule to create one.",
+      th_order: "Order",
+      th_name: "Rule Name / ID",
+      th_scope: "Scope / Matching",
+      th_actions: "Actions / Mutators",
+      th_state: "State",
+      th_op_actions: "Operations",
+      preview_heading: "Rule Preview & Simulation",
+      run_preview_btn: "Run Preview Simulation",
+    },
+    notifications: {
+      heading: "Incident Notifications & Health Alerts",
+      subtitle: "System degradation, proxy routing errors, storage thresholds, and recovery events.",
+      stream_heading: "Live Incident Stream (WebSocket)",
+      open_incidents_heading: "Active Incidents",
+      th_seq: "Seq",
+      th_time: "Time",
+      th_severity: "Severity",
+      th_kind: "Incident Kind",
+      th_summary: "Summary",
+      th_status: "Status",
+      th_actions: "Actions",
+      empty_incidents: "No active incidents currently reported.",
+      toast_heading: "Recent Alerts",
+    },
+  },
+  ja: {
+    app: {
+      title: "ProxyConsole — ルートとDockerターゲット管理",
+      heading: "ProxyConsole",
+      subtitle: "ローカル開発用 ルーティング・Dockerターゲット・リクエスト監視・再送コンソール",
+    },
+    header: {
+      subtitle: "ローカル開発用 ルーティング・Dockerターゲット・リクエスト監視・再送コンソール",
+    },
+    nav: {
+      overview: "概要",
+      routes: "ルートとDocker",
+      requests: "リクエストと再送",
+      rules: "変更ルール",
+      notifications: "通知",
+      all: "全ワークスペース",
+    },
+    common: {
+      refresh: "状態更新",
+      ready: "準備完了",
+      healthy: "正常",
+      degraded: "低下",
+      down: "停止",
+      available: "利用可能",
+      unavailable: "利用不可",
+      retry: "再試行",
+      loading: "読み込み中...",
+      checking: "確認中...",
+      enabled: "有効",
+      disabled: "無効",
+      status: "状態",
+      actions: "操作",
+      delete: "削除",
+      cancel: "キャンセル",
+      save: "保存",
+      copy: "コピー",
+      close: "閉じる",
+      apply: "適用",
+      applied: "適用済",
+      in_sync: "同期済",
+      out_of_sync: "未同期",
+      view: "表示",
+      edit: "編集",
+      language: "言語",
+    },
+    feedback: {
+      ready_title: "準備完了",
+      ready_msg: "ローカル制御APIからルートおよびDocker検出状態を読み込みました。",
+    },
+    status: {
+      healthy: "正常",
+      checking: "確認中...",
+      applied: "適用済",
+      in_sync: "同期済",
+      out_of_sync: "未同期",
+      available: "利用可能",
+      unavailable: "利用不可",
+      normal: "通常",
+      warning: "警告",
+      enforcing: "強制制限中",
+      complete: "完全",
+      metadata_only: "メタデータのみ",
+      replayable: "再送可能",
+      non_replayable: "再送不可",
+      critical: "致命的",
+      error: "エラー",
+      info: "情報",
+    },
+    overview: {
+      heading: "システム概要",
+      subtitle: "プロキシルーティング、Dockerサービス、キャプチャ活動、ストレージ、障害通知のフォームなし集約ダッシュボード。",
+      last_refresh: "最終更新:",
+      card_health_title: "プロキシ・制御API健全性",
+      health_desc: "TLS Edge、Mitmproxy Inspector、Nginx Router、Control API はすべて応答しています。",
+      view_routes_deep: "ルート・ルーターステータスを確認 →",
+      card_routes_title: "ドメインルート・同期状態",
+      routes_active_label: "有効 / 全ドメインルート数。",
+      manage_routes_deep: "ルートとターゲットを管理 →",
+      card_docker_title: "Docker ターゲットコンテナ",
+      view_docker_deep: "Docker コンテナ一覧 →",
+      card_captures_title: "HTTP キャプチャ",
+      captures_in_24h: "直近24時間に記録されたリクエスト",
+      total_indexed: "件 登録済",
+      view_captures_deep: "リクエスト一覧と再送を開く →",
+      card_storage_title: "ストレージ・保持ポリシー",
+      storage_limits_label: "上限閾値:",
+      view_retention_deep: "ストレージ詳細を確認 →",
+      card_incidents_title: "障害インシデント・通知",
+      incidents_clear: "未確認のシステム障害はありません。",
+      view_notifications_deep: "障害通知の一覧を確認 →",
+      card_sqlite_title: "SQLite データベース",
+      sqlite_wal: "WALモード稼働中、スキーマは最新です。",
+      view_db_deep: "インデックス状態を確認 →",
+      card_rules_title: "変更ルール",
+      rules_desc: "プロキシトラフィックに即時適用されるリクエスト・ヘッダー書換ルール。",
+      view_rules_deep: "変更ルールを管理 →",
+    },
+    routes: {
+      apply_heading: "Nginx ルーター適用ステータス",
+      routes_heading: "ドメインルート",
+      routes_subtitle: "Hostヘッダーによるルーティング定義。SQLiteに永続化され、内部Nginxルーターへアトミックに適用されます。",
+      new_route_btn: "+ 新規ルート作成",
+      empty_state: "ドメインルートは登録されていません。フォームからルートを作成してください。",
+      th_domain: "ドメイン",
+      th_enabled: "有効",
+      th_upstream: "転送先 (Upstream)",
+      th_target_type: "種別",
+      th_target_state: "状態",
+      th_apply_status: "適用状況",
+      th_actions: "操作",
+      docker_heading: "Docker コンテナとポート候補",
+      docker_subtitle: "control-api経由でDocker Engineソケットから自動検出。稼働中の候補を選択してルート入力欄へ反映できます。",
+      refresh_docker_btn: "Docker を再検出",
+      show_system_containers: "ProxyConsole システムコンテナを表示 (読取専用)",
+      docker_empty: "ローカルDockerデーモン上で検出されたコンテナはありません。",
+      th_service: "サービス名 / 名前",
+      th_container_id: "コンテナID",
+      th_state: "状態",
+      th_network: "ネットワーク",
+      th_target_id: "ターゲットID",
+      th_port_candidate: "ポート候補",
+    },
+    requests: {
+      heading: "記録済み HTTP リクエスト",
+      subtitle: "保存されたキャプチャ一覧。リクエストを選択してヘッダー・本文確認、cURL/fetch出力、再送ドラフト作成を行えます。",
+      filter_heading: "キャプチャの絞り込み・検索",
+      reset_filters_btn: "条件をリセット",
+      th_time: "日時",
+      th_method: "メソッド",
+      th_host: "ホスト",
+      th_path: "パス",
+      th_status: "ステータス",
+      th_capture_status: "保存状態",
+      th_replayable: "再送可否",
+      th_actions: "操作",
+      empty_state: "条件に一致するキャプチャは見つかりませんでした。",
+      detail_heading: "キャプチャ詳細と検査",
+      detail_empty: "一覧からリクエストを選択すると、ヘッダー、本文、再送可否、エクスポートが表示されます。",
+      draft_editor_heading: "リクエストドラフト・再送エディタ",
+      send_replay_btn: "今すぐ再送を実行",
+      saved_drafts_heading: "保存済みドラフト",
+    },
+    rules: {
+      heading: "変更ルール一覧",
+      subtitle: "ターゲット転送前にMitmproxyインスペクターで順次評価・適用されるリクエスト変更ルール。",
+      new_rule_btn: "+ 新規ルール作成",
+      empty_state: "変更ルールは設定されていません。「+ 新規ルール作成」から追加してください。",
+      th_order: "順序",
+      th_name: "ルール名 / ID",
+      th_scope: "対象スコープ",
+      th_actions: "変更アクション",
+      th_state: "有効/無効",
+      th_op_actions: "操作",
+      preview_heading: "ルールプレビュー・シミュレーション",
+      run_preview_btn: "プレビューを実行",
+    },
+    notifications: {
+      heading: "インシデント通知・健全性アラート",
+      subtitle: "システムの縮退、プロキシルーティング障害、ストレージ閾値警告、回復イベントを集約。",
+      stream_heading: "ライブインシデントストリーム (WebSocket)",
+      open_incidents_heading: "アクティブなインシデント",
+      th_seq: "連番",
+      th_time: "発生時刻",
+      th_severity: "深刻度",
+      th_kind: "種別",
+      th_summary: "概要",
+      th_status: "状態",
+      th_actions: "操作",
+      empty_incidents: "現在アクティブなインシデントはありません。",
+      toast_heading: "最新のアラート",
+    },
+  },
+};
+
+function getLocale() {
+  return appState.currentLocale || "en";
+}
+
+function t(key, params = {}) {
+  const lang = getLocale();
+  const keys = key.split(".");
+  let val = I18N_CATALOG[lang];
+  for (const k of keys) {
+    if (val && typeof val === "object" && k in val) {
+      val = val[k];
+    } else {
+      val = null;
+      break;
+    }
+  }
+  if (val == null && lang !== "en") {
+    let fallback = I18N_CATALOG.en;
+    for (const k of keys) {
+      if (fallback && typeof fallback === "object" && k in fallback) {
+        fallback = fallback[k];
+      } else {
+        fallback = null;
+        break;
+      }
+    }
+    val = fallback;
+  }
+  if (val == null) {
+    val = key;
+  }
+  if (typeof val === "string") {
+    for (const [pKey, pVal] of Object.entries(params)) {
+      val = val.replaceAll(`{${pKey}}`, String(pVal));
+    }
+  }
+  return val;
+}
+
+function applyTranslations(lang) {
+  appState.currentLocale = lang;
+  document.documentElement.lang = lang;
+  document.title = t("app.title");
+
+  const langSelect = document.getElementById("language-select");
+  if (langSelect && langSelect.value !== lang) {
+    langSelect.value = lang;
+  }
+
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.getAttribute("data-i18n");
+    if (key) {
+      el.textContent = t(key);
+    }
+  });
+
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-title");
+    if (key) {
+      el.setAttribute("title", t(key));
+    }
+  });
+
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-placeholder");
+    if (key) {
+      el.setAttribute("placeholder", t(key));
+    }
+  });
+
+  document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-aria");
+    if (key) {
+      el.setAttribute("aria-label", t(key));
+    }
+  });
+
+  if (appState.workspaceView === "overview" && appState.overviewSummary) {
+    renderOverviewSummary(appState.overviewSummary);
+  }
+}
+
+function setLanguage(lang) {
+  if (lang !== "en" && lang !== "ja") {
+    lang = "en";
+  }
+  localStorage.setItem("proxyconsole_locale", lang);
+  applyTranslations(lang);
+}
+
+function initLanguage() {
+  const saved = localStorage.getItem("proxyconsole_locale");
+  let chosen = "en";
+  if (saved === "en" || saved === "ja") {
+    chosen = saved;
+  } else {
+    const navLang =
+      (navigator.languages && navigator.languages[0]) ||
+      navigator.language ||
+      "";
+    if (navLang.toLowerCase().startsWith("ja")) {
+      chosen = "ja";
+    }
+  }
+  setLanguage(chosen);
+
+  const langSelect = document.getElementById("language-select");
+  if (langSelect) {
+    langSelect.value = chosen;
+    langSelect.addEventListener("change", (e) => {
+      setLanguage(e.target.value);
+    });
+  }
+}
+
 const appState = {
+  currentLocale: "en",
+  overviewSummary: null,
   routes: [],
   applyStatus: null,
   discoveryAvailable: true,
@@ -13,7 +480,7 @@ const appState = {
   deleteTargetRoute: null,
   pendingOps: 0,
   // DEV-031 state
-  workspaceView: "all",
+  workspaceView: "overview",
   captures: [],
   capturesTotal: 0,
   capturesOffset: 0,
@@ -1238,10 +1705,12 @@ retryApplyBtn.addEventListener("click", handleRetryApply);
 // DEV-031: Requests List, Capture Detail, Draft Editor, Replay & Export
 // ================================================================
 const viewAllBtn = document.getElementById("view-all-btn");
+const viewOverviewBtn = document.getElementById("view-overview-btn");
 const viewRoutesBtn = document.getElementById("view-routes-btn");
 const viewRequestsBtn = document.getElementById("view-requests-btn");
 const viewRulesBtn = document.getElementById("view-rules-btn");
 const viewNotificationsBtn = document.getElementById("view-notifications-btn");
+const overviewWorkspace = document.getElementById("overview-workspace");
 const routesWorkspace = document.getElementById("routes-workspace");
 const requestsWorkspace = document.getElementById("requests-workspace");
 const rulesWorkspace = document.getElementById("rules-workspace");
@@ -1412,10 +1881,30 @@ const replayConfirmCancelBtn = document.getElementById("replay-confirm-cancel-bt
 const replayConfirmSendBtn = document.getElementById("replay-confirm-send-btn");
 
 function setWorkspaceView(mode) {
+  const validModes = [
+    "overview",
+    "routes",
+    "requests",
+    "rules",
+    "notifications",
+    "all",
+  ];
+  if (!validModes.includes(mode)) {
+    mode = "overview";
+  }
   appState.workspaceView = mode;
-  viewAllBtn.setAttribute("aria-pressed", String(mode === "all"));
-  viewRoutesBtn.setAttribute("aria-pressed", String(mode === "routes"));
-  viewRequestsBtn.setAttribute("aria-pressed", String(mode === "requests"));
+  localStorage.setItem("proxyconsole_workspace", mode);
+
+  if (viewAllBtn) viewAllBtn.setAttribute("aria-pressed", String(mode === "all"));
+  if (viewOverviewBtn) {
+    viewOverviewBtn.setAttribute("aria-pressed", String(mode === "overview"));
+  }
+  if (viewRoutesBtn) {
+    viewRoutesBtn.setAttribute("aria-pressed", String(mode === "routes"));
+  }
+  if (viewRequestsBtn) {
+    viewRequestsBtn.setAttribute("aria-pressed", String(mode === "requests"));
+  }
   if (viewRulesBtn) {
     viewRulesBtn.setAttribute("aria-pressed", String(mode === "rules"));
   }
@@ -1425,19 +1914,63 @@ function setWorkspaceView(mode) {
       String(mode === "notifications")
     );
   }
-  routesWorkspace.hidden = mode !== "all" && mode !== "routes";
-  requestsWorkspace.hidden = mode !== "all" && mode !== "requests";
+
+  if (overviewWorkspace) {
+    overviewWorkspace.hidden = mode !== "all" && mode !== "overview";
+  }
+  if (routesWorkspace) {
+    routesWorkspace.hidden = mode !== "all" && mode !== "routes";
+  }
+  if (requestsWorkspace) {
+    requestsWorkspace.hidden = mode !== "all" && mode !== "requests";
+  }
   if (rulesWorkspace) {
     rulesWorkspace.hidden = mode !== "all" && mode !== "rules";
   }
   if (notificationsWorkspace) {
-    notificationsWorkspace.hidden = mode !== "all" && mode !== "notifications";
+    notificationsWorkspace.hidden =
+      mode !== "all" && mode !== "notifications";
+  }
+
+  if (mode === "overview" || mode === "all") {
+    refreshOverview();
   }
 }
 
-viewAllBtn.addEventListener("click", () => setWorkspaceView("all"));
-viewRoutesBtn.addEventListener("click", () => setWorkspaceView("routes"));
-viewRequestsBtn.addEventListener("click", () => setWorkspaceView("requests"));
+window.setWorkspaceView = setWorkspaceView;
+window.initWorkspace = initWorkspace;
+window.t = t;
+window.setLanguage = setLanguage;
+
+function initWorkspace() {
+  const saved = localStorage.getItem("proxyconsole_workspace");
+  const validModes = [
+    "overview",
+    "routes",
+    "requests",
+    "rules",
+    "notifications",
+    "all",
+  ];
+  if (saved && validModes.includes(saved)) {
+    setWorkspaceView(saved);
+  } else {
+    setWorkspaceView("overview");
+  }
+}
+
+if (viewAllBtn) {
+  viewAllBtn.addEventListener("click", () => setWorkspaceView("all"));
+}
+if (viewOverviewBtn) {
+  viewOverviewBtn.addEventListener("click", () => setWorkspaceView("overview"));
+}
+if (viewRoutesBtn) {
+  viewRoutesBtn.addEventListener("click", () => setWorkspaceView("routes"));
+}
+if (viewRequestsBtn) {
+  viewRequestsBtn.addEventListener("click", () => setWorkspaceView("requests"));
+}
 if (viewRulesBtn) {
   viewRulesBtn.addEventListener("click", () => setWorkspaceView("rules"));
 }
@@ -1446,6 +1979,271 @@ if (viewNotificationsBtn) {
     setWorkspaceView("notifications")
   );
 }
+
+// Overview Dashboard Logic
+async function refreshOverview() {
+  const refreshBtn = document.getElementById("overview-refresh-btn");
+  if (refreshBtn) refreshBtn.disabled = true;
+
+  try {
+    const res = await fetch("/api/v1/overview/summary");
+    if (!res.ok) {
+      throw new Error(`Overview summary returned HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    appState.overviewSummary = data;
+    renderOverviewSummary(data);
+  } catch (err) {
+    console.error("Failed to load overview summary:", err);
+    renderOverviewError(err);
+  } finally {
+    if (refreshBtn) refreshBtn.disabled = false;
+  }
+}
+
+function renderOverviewSummary(data) {
+  if (!data) return;
+  const now = new Date();
+  const lastRefreshText = document.getElementById("overview-last-refresh");
+  if (lastRefreshText) {
+    lastRefreshText.textContent = now.toLocaleTimeString();
+  }
+
+  // 1. Health Card
+  const healthCard = document.getElementById("overview-card-health");
+  if (healthCard) {
+    healthCard.dataset.state = "ok";
+    const badge = document.getElementById("overview-health-badge");
+    if (badge) {
+      badge.className = "badge badge-success";
+      badge.textContent = t("status.healthy");
+    }
+  }
+
+  // 2. Routes Card
+  const routesCard = document.getElementById("overview-card-routes");
+  if (routesCard && data.routes) {
+    routesCard.dataset.state = "ok";
+    const rCount = document.getElementById("overview-routes-count");
+    if (rCount) {
+      rCount.textContent = `${data.routes.enabled} / ${data.routes.total}`;
+    }
+    const rSha = document.getElementById("overview-routes-sha");
+    if (rSha) {
+      rSha.textContent = data.routes.active_config_sha256
+        ? data.routes.active_config_sha256.substring(0, 8)
+        : "-";
+    }
+    const syncBadge = document.getElementById("overview-routes-sync-badge");
+    if (syncBadge) {
+      syncBadge.className = data.routes.in_sync
+        ? "badge badge-success"
+        : "badge badge-warning";
+      syncBadge.textContent = data.routes.in_sync
+        ? t("status.in_sync")
+        : t("status.out_of_sync");
+    }
+  }
+
+  // 3. Docker Card
+  const dockerCard = document.getElementById("overview-card-docker");
+  if (dockerCard && data.docker) {
+    const availBadge = document.getElementById("overview-docker-avail-badge");
+    const dCount = document.getElementById("overview-docker-count");
+    const dStopped = document.getElementById("overview-docker-stopped-count");
+    if (data.docker.available) {
+      dockerCard.dataset.state = "ok";
+      if (availBadge) {
+        availBadge.className = "badge badge-success";
+        availBadge.textContent = t("status.available");
+      }
+      if (dCount) {
+        dCount.textContent = `${data.docker.running_containers} running`;
+      }
+      if (dStopped) {
+        dStopped.textContent = String(data.docker.stopped_containers);
+      }
+    } else {
+      dockerCard.dataset.state = "unavailable";
+      if (availBadge) {
+        availBadge.className = "badge badge-danger";
+        availBadge.textContent = t("status.unavailable");
+      }
+      if (dCount) {
+        dCount.textContent = t("status.unavailable");
+      }
+    }
+  }
+
+  // 4. Captures Card
+  const capturesCard = document.getElementById("overview-card-captures");
+  if (capturesCard && data.captures) {
+    capturesCard.dataset.state = "ok";
+    const c24h = document.getElementById("overview-captures-24h");
+    const cTotal = document.getElementById("overview-captures-total");
+    if (c24h) c24h.textContent = String(data.captures.last_24h ?? 0);
+    if (cTotal) cTotal.textContent = String(data.captures.total ?? 0);
+  }
+
+  // 5. Storage Card
+  const storageCard = document.getElementById("overview-card-storage");
+  if (storageCard && data.storage) {
+    storageCard.dataset.state = "ok";
+    const sUsed = document.getElementById("overview-storage-used");
+    const sBadge = document.getElementById("overview-storage-status-badge");
+    const sLimits = document.getElementById("overview-storage-limits");
+    const mb = (data.storage.storage_bytes / (1024 * 1024)).toFixed(1);
+    if (sUsed) sUsed.textContent = `${mb} MB`;
+    if (sBadge) {
+      sBadge.textContent = data.storage.status || "normal";
+      sBadge.className =
+        data.storage.status === "normal"
+          ? "badge badge-neutral"
+          : "badge badge-warning";
+    }
+    if (sLimits) {
+      const softMb = data.storage.soft_limit_bytes
+        ? (data.storage.soft_limit_bytes / (1024 * 1024)).toFixed(0) + " MB"
+        : "-";
+      const hardMb = data.storage.hard_limit_bytes
+        ? (data.storage.hard_limit_bytes / (1024 * 1024)).toFixed(0) + " MB"
+        : "-";
+      sLimits.textContent = `Soft: ${softMb} / Hard: ${hardMb}`;
+    }
+  }
+
+  // 6. Incidents Card
+  const incidentsCard = document.getElementById("overview-card-incidents");
+  if (incidentsCard && data.incidents) {
+    incidentsCard.dataset.state = "ok";
+    const iBadge = document.getElementById("overview-incidents-badge");
+    const iUnack = document.getElementById("overview-incidents-unack");
+    const iDesc = document.getElementById("overview-incidents-desc");
+    const unack = data.incidents.unacknowledged_count ?? 0;
+    if (iUnack) iUnack.textContent = String(unack);
+    if (iBadge) {
+      iBadge.className =
+        unack > 0 ? "badge badge-danger" : "badge badge-neutral";
+      iBadge.textContent = `${unack} open`;
+    }
+    if (iDesc) {
+      iDesc.textContent =
+        unack > 0
+          ? `${unack} unacknowledged incident(s) require attention.`
+          : t("overview.incidents_clear");
+    }
+  }
+
+  // 7. SQLite Card
+  const sqliteCard = document.getElementById("overview-card-sqlite");
+  if (sqliteCard && data.sqlite) {
+    sqliteCard.dataset.state = "ok";
+    const sqPrimary = document.getElementById("overview-sqlite-primary");
+    const sqBadge = document.getElementById("overview-sqlite-badge");
+    if (sqPrimary) {
+      sqPrimary.textContent = `Integrity: ${data.sqlite.integrity || "OK"}`;
+    }
+    if (sqBadge) {
+      sqBadge.textContent = data.sqlite.integrity === "ok" ? "OK" : "Error";
+      sqBadge.className =
+        data.sqlite.integrity === "ok"
+          ? "badge badge-success"
+          : "badge badge-danger";
+    }
+  }
+
+  // 8. Rules Card
+  const rulesCard = document.getElementById("overview-card-rules");
+  if (rulesCard) {
+    rulesCard.dataset.state = "ok";
+    const rBadge = document.getElementById("overview-rules-badge");
+    const rCount = document.getElementById("overview-rules-count");
+    const count = appState.rules
+      ? appState.rules.filter((r) => r.enabled).length
+      : 0;
+    if (rCount) rCount.textContent = String(count);
+    if (rBadge) rBadge.textContent = `${count} active`;
+  }
+}
+
+function renderOverviewError(err) {
+  const healthCard = document.getElementById("overview-card-health");
+  if (healthCard) {
+    healthCard.dataset.state = "unavailable";
+    const badge = document.getElementById("overview-health-badge");
+    if (badge) {
+      badge.className = "badge badge-danger";
+      badge.textContent = t("status.unavailable");
+    }
+  }
+}
+
+const overviewRefreshBtn = document.getElementById("overview-refresh-btn");
+if (overviewRefreshBtn) {
+  overviewRefreshBtn.addEventListener("click", () => refreshOverview());
+}
+
+// Deep Navigation from Overview Cards
+document.addEventListener("click", (e) => {
+  const deepLink = e.target.closest(".overview-deep-link");
+  if (deepLink) {
+    e.preventDefault();
+    const targetWs = deepLink.dataset.targetWorkspace;
+    if (targetWs) {
+      setWorkspaceView(targetWs);
+      const scrollId = deepLink.dataset.targetScroll;
+      if (scrollId) {
+        setTimeout(() => {
+          const targetEl = document.getElementById(scrollId);
+          if (targetEl) {
+            targetEl.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        }, 50);
+      }
+    }
+  }
+});
+
+// Keyboard Shortcuts: Alt+1..5
+window.addEventListener("keydown", (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+    return;
+  }
+  const active = document.activeElement;
+  if (active) {
+    const tag = active.tagName.toLowerCase();
+    if (
+      tag === "input" ||
+      tag === "textarea" ||
+      tag === "select" ||
+      active.isContentEditable
+    ) {
+      return;
+    }
+    const dialog = active.closest("dialog");
+    if (dialog && dialog.open) {
+      return;
+    }
+  }
+
+  const map = {
+    "1": "overview",
+    "2": "routes",
+    "3": "requests",
+    "4": "rules",
+    "5": "notifications",
+  };
+
+  const targetMode = map[e.key];
+  if (targetMode) {
+    e.preventDefault();
+    setWorkspaceView(targetMode);
+    const navBtn = document.getElementById(`view-${targetMode}-btn`);
+    if (navBtn) {
+      navBtn.focus();
+    }
+  }
+});
 
 function buildCapturesQueryString() {
   const params = new URLSearchParams();
@@ -6954,4 +7752,6 @@ if (notifDetailFilterFpBtn) {
 syncBrowserNotificationUI();
 
 // Initial load
+initLanguage();
+initWorkspace();
 loadAllState({ refreshDiscovery: true });

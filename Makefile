@@ -25,6 +25,7 @@ test:
 	./tests/integration/test_modification_rules.sh
 	./tests/integration/test_web_rules_console.sh
 	./tests/integration/test_notifications_console.sh
+	./tests/integration/test_overview_i18n_navigation.sh
 
 readiness-check:
 	./scripts/check-company-readiness.sh

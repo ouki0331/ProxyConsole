@@ -13,26 +13,36 @@
       <span class="subtitle">Localhost Route, Docker Target, Request Viewer &amp; Replay Console</span>
     </div>
     <nav aria-label="Console Workspaces" class="header-nav">
-      <button type="button" id="view-all-btn" class="btn btn-sm btn-secondary" aria-pressed="true">
+      <button type="button" id="view-all-btn" class="btn btn-sm btn-secondary" aria-pressed="false" hidden>
         All Workspaces
       </button>
-      <button type="button" id="view-routes-btn" class="btn btn-sm btn-secondary" aria-pressed="false">
-        Routes &amp; Docker
+      <button type="button" id="view-overview-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="true" data-workspace="overview" title="Overview (Alt+1)">
+        <span data-i18n="nav.overview">Overview</span> <kbd class="kbd-hint">Alt+1</kbd>
       </button>
-      <button type="button" id="view-requests-btn" class="btn btn-sm btn-secondary" aria-pressed="false">
-        Requests &amp; Replay
+      <button type="button" id="view-routes-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="routes" title="Routes &amp; Docker (Alt+2)">
+        <span data-i18n="nav.routes">Routes &amp; Docker</span> <kbd class="kbd-hint">Alt+2</kbd>
       </button>
-      <button type="button" id="view-rules-btn" class="btn btn-sm btn-secondary" aria-pressed="false">
-        Modification Rules
+      <button type="button" id="view-requests-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="requests" title="Requests &amp; Replay (Alt+3)">
+        <span data-i18n="nav.requests">Requests &amp; Replay</span> <kbd class="kbd-hint">Alt+3</kbd>
       </button>
-      <button type="button" id="view-notifications-btn" class="btn btn-sm btn-secondary" aria-pressed="false">
-        Notifications <span id="notifications-nav-badge" class="badge badge-neutral">0</span>
+      <button type="button" id="view-rules-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="rules" title="Modification Rules (Alt+4)">
+        <span data-i18n="nav.rules">Modification Rules</span> <kbd class="kbd-hint">Alt+4</kbd>
+      </button>
+      <button type="button" id="view-notifications-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="notifications" title="Notifications (Alt+5)">
+        <span data-i18n="nav.notifications">Notifications</span> <span id="notifications-nav-badge" class="badge badge-neutral">0</span> <kbd class="kbd-hint">Alt+5</kbd>
       </button>
     </nav>
     <div class="header-actions">
+      <div class="lang-selector-wrap">
+        <label for="language-select" class="visually-hidden">Language / 言語</label>
+        <select id="language-select" class="lang-select" aria-label="Language / 言語">
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+        </select>
+      </div>
       <span id="ws-feed-status-badge" class="badge badge-neutral" data-ws-state="connecting">WS: Connecting...</span>
       <button type="button" id="refresh-all-btn" class="btn btn-secondary">
-        Refresh State
+        <span data-i18n="common.refresh">Refresh State</span>
       </button>
     </div>
   </header>
@@ -41,13 +51,153 @@
     <!-- Feedback / Alert Banner -->
     <section id="feedback-banner" class="feedback-banner" role="status" aria-live="polite" data-state="idle" data-error-code="">
       <div class="feedback-content">
-        <strong id="feedback-title">Ready</strong>
-        <span id="feedback-message">Loaded route and Docker discovery state from local control API.</span>
+        <strong id="feedback-title" data-i18n="feedback.ready_title">Ready</strong>
+        <span id="feedback-message" data-i18n="feedback.ready_msg">Loaded route and Docker discovery state from local control API.</span>
         <span id="feedback-hint" class="feedback-hint"></span>
       </div>
     </section>
 
-    <div id="routes-workspace" class="console-workspace">
+    <!-- DEV-060: Overview Workspace (Default, Form-free) -->
+    <div id="overview-workspace" class="console-workspace">
+      <section class="card overview-hero-card" aria-labelledby="overview-heading">
+        <div class="overview-hero-header">
+          <div>
+            <h2 id="overview-heading" data-i18n="overview.heading">System Overview</h2>
+            <p class="card-subtitle" data-i18n="overview.subtitle">Form-free operational status of proxy routing, Docker services, capture activity, storage, and incidents.</p>
+          </div>
+          <div class="overview-hero-meta">
+            <span id="overview-last-refresh-label" class="text-muted"><span data-i18n="overview.last_refresh">Last Refreshed:</span> <strong id="overview-last-refresh">-</strong></span>
+            <button type="button" id="overview-refresh-btn" class="btn btn-sm btn-secondary">
+              <span data-i18n="common.refresh">Refresh Overview</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div class="overview-grid">
+        <!-- 1. Proxy & Control Health Card -->
+        <section id="overview-card-health" class="card overview-card" aria-labelledby="card-health-heading">
+          <div class="overview-card-header">
+            <h3 id="card-health-heading" data-i18n="overview.card_health_title">Proxy &amp; Control Health</h3>
+            <span id="overview-health-badge" class="badge badge-success" data-i18n="status.healthy">Healthy</span>
+          </div>
+          <div class="overview-card-body">
+            <div class="metric-primary" id="overview-health-primary">127.0.0.1:8443 / 18480</div>
+            <p class="metric-description" id="overview-health-desc" data-i18n="overview.health_desc">TLS Edge, Mitmproxy Inspector, Nginx Router, and Control API are responsive.</p>
+          </div>
+          <div class="overview-card-footer">
+            <button type="button" class="btn-link overview-deep-link" data-target-workspace="routes" data-i18n="overview.view_routes_deep">View Routes &amp; Router Status &rarr;</button>
+          </div>
+        </section>
+
+        <!-- 2. Routes & Apply Sync Card -->
+        <section id="overview-card-routes" class="card overview-card" aria-labelledby="card-routes-heading">
+          <div class="overview-card-header">
+            <h3 id="card-routes-heading" data-i18n="overview.card_routes_title">Domain Routes &amp; Sync</h3>
+            <span id="overview-routes-sync-badge" class="badge badge-neutral" data-i18n="status.checking">Checking...</span>
+          </div>
+          <div class="overview-card-body">
+            <div class="metric-primary" id="overview-routes-count">0 / 0</div>
+            <p class="metric-description"><span data-i18n="overview.routes_active_label">Enabled / Total domain routes.</span> <span id="overview-routes-sha-label">SHA: <code id="overview-routes-sha">-</code></span></p>
+          </div>
+          <div class="overview-card-footer">
+            <button type="button" class="btn-link overview-deep-link" data-target-workspace="routes" data-i18n="overview.manage_routes_deep">Manage Routes &amp; Targets &rarr;</button>
+          </div>
+        </section>
+
+        <!-- 3. Docker Containers Card -->
+        <section id="overview-card-docker" class="card overview-card" aria-labelledby="card-docker-heading">
+          <div class="overview-card-header">
+            <h3 id="card-docker-heading" data-i18n="overview.card_docker_title">Docker Target Containers</h3>
+            <span id="overview-docker-avail-badge" class="badge badge-neutral" data-i18n="status.checking">Checking...</span>
+          </div>
+          <div class="overview-card-body">
+            <div class="metric-primary" id="overview-docker-count">0 running</div>
+            <p class="metric-description" id="overview-docker-desc"><span id="overview-docker-stopped-count">0</span> stopped containers discovered.</p>
+          </div>
+          <div class="overview-card-footer">
+            <button type="button" class="btn-link overview-deep-link" data-target-workspace="routes" data-target-scroll="docker-discovery-section" data-i18n="overview.view_docker_deep">View Docker Containers &rarr;</button>
+          </div>
+        </section>
+
+        <!-- 4. HTTP Captures Card -->
+        <section id="overview-card-captures" class="card overview-card" aria-labelledby="card-captures-heading">
+          <div class="overview-card-header">
+            <h3 id="card-captures-heading" data-i18n="overview.card_captures_title">HTTP Captures</h3>
+            <span id="overview-captures-badge" class="badge badge-outline">24h</span>
+          </div>
+          <div class="overview-card-body">
+            <div class="metric-primary" id="overview-captures-24h">0</div>
+            <p class="metric-description"><span data-i18n="overview.captures_in_24h">Captures recorded in last 24h</span> (<span id="overview-captures-total">0</span> <span data-i18n="overview.total_indexed">total indexed</span>).</p>
+          </div>
+          <div class="overview-card-footer">
+            <button type="button" class="btn-link overview-deep-link" data-target-workspace="requests" data-i18n="overview.view_captures_deep">Explore Requests &amp; Replay &rarr;</button>
+          </div>
+        </section>
+
+        <!-- 5. Storage & Retention Card -->
+        <section id="overview-card-storage" class="card overview-card" aria-labelledby="card-storage-heading">
+          <div class="overview-card-header">
+            <h3 id="card-storage-heading" data-i18n="overview.card_storage_title">Storage &amp; Retention</h3>
+            <span id="overview-storage-status-badge" class="badge badge-neutral">normal</span>
+          </div>
+          <div class="overview-card-body">
+            <div class="metric-primary" id="overview-storage-used">0 MB</div>
+            <p class="metric-description"><span data-i18n="overview.storage_limits_label">Limits:</span> <span id="overview-storage-limits">Soft: - / Hard: -</span></p>
+          </div>
+          <div class="overview-card-footer">
+            <button type="button" class="btn-link overview-deep-link" data-target-workspace="requests" data-i18n="overview.view_retention_deep">View Storage Details &rarr;</button>
+          </div>
+        </section>
+
+        <!-- 6. Incident Notifications Card -->
+        <section id="overview-card-incidents" class="card overview-card" aria-labelledby="card-incidents-heading">
+          <div class="overview-card-header">
+            <h3 id="card-incidents-heading" data-i18n="overview.card_incidents_title">Incident Notifications</h3>
+            <span id="overview-incidents-badge" class="badge badge-neutral">0 open</span>
+          </div>
+          <div class="overview-card-body">
+            <div class="metric-primary" id="overview-incidents-unack">0</div>
+            <p class="metric-description" id="overview-incidents-desc" data-i18n="overview.incidents_clear">No unacknowledged system incidents.</p>
+          </div>
+          <div class="overview-card-footer">
+            <button type="button" class="btn-link overview-deep-link" data-target-workspace="notifications" data-i18n="overview.view_notifications_deep">View Incident Notifications &rarr;</button>
+          </div>
+        </section>
+
+        <!-- 7. SQLite Health Card -->
+        <section id="overview-card-sqlite" class="card overview-card" aria-labelledby="card-sqlite-heading">
+          <div class="overview-card-header">
+            <h3 id="card-sqlite-heading" data-i18n="overview.card_sqlite_title">SQLite Health</h3>
+            <span id="overview-sqlite-badge" class="badge badge-success">OK</span>
+          </div>
+          <div class="overview-card-body">
+            <div class="metric-primary" id="overview-sqlite-primary">Integrity: OK</div>
+            <p class="metric-description" id="overview-sqlite-desc"><span data-i18n="overview.sqlite_wal">WAL mode active, schema up to date.</span></p>
+          </div>
+          <div class="overview-card-footer">
+            <button type="button" class="btn-link overview-deep-link" data-target-workspace="routes" data-i18n="overview.view_db_deep">Check Index Status &rarr;</button>
+          </div>
+        </section>
+
+        <!-- 8. Modification Rules Card -->
+        <section id="overview-card-rules" class="card overview-card" aria-labelledby="card-rules-heading">
+          <div class="overview-card-header">
+            <h3 id="card-rules-heading" data-i18n="overview.card_rules_title">Modification Rules</h3>
+            <span id="overview-rules-badge" class="badge badge-neutral">0 active</span>
+          </div>
+          <div class="overview-card-body">
+            <div class="metric-primary" id="overview-rules-count">0</div>
+            <p class="metric-description" data-i18n="overview.rules_desc">Live request &amp; header rewrite rules applied to proxy traffic.</p>
+          </div>
+          <div class="overview-card-footer">
+            <button type="button" class="btn-link overview-deep-link" data-target-workspace="rules" data-i18n="overview.view_rules_deep">Manage Modification Rules &rarr;</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div id="routes-workspace" class="console-workspace" hidden>
     <!-- Routing & Nginx Apply Status Panel -->
     <section id="apply-status-panel" class="card status-card" aria-labelledby="apply-status-heading">
       <div class="status-header">

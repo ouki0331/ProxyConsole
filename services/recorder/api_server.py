@@ -208,6 +208,10 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"status": "ok"})
                 return
 
+            if path == "/api/v1/overview/summary":
+                self._send_json(200, self.store.get_overview_summary())
+                return
+
             if path == "/api/v1/index/status":
                 self._send_json(200, self.store.get_index_status())
                 return
