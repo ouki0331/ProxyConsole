@@ -25,8 +25,12 @@
       <button type="button" id="view-rules-btn" class="btn btn-sm btn-secondary" aria-pressed="false">
         Modification Rules
       </button>
+      <button type="button" id="view-notifications-btn" class="btn btn-sm btn-secondary" aria-pressed="false">
+        Notifications <span id="notifications-nav-badge" class="badge badge-neutral">0</span>
+      </button>
     </nav>
     <div class="header-actions">
+      <span id="ws-feed-status-badge" class="badge badge-neutral" data-ws-state="connecting">WS: Connecting...</span>
       <button type="button" id="refresh-all-btn" class="btn btn-secondary">
         Refresh State
       </button>
@@ -1831,7 +1835,333 @@
         </section>
       </div>
     </div>
+
+    <!-- =================================================================== -->
+    <!-- DEV-042: Aggregated Local Notifications & Live Event Feed Workspace -->
+    <!-- =================================================================== -->
+    <div id="notifications-workspace" class="console-workspace">
+      <section id="notifications-status-card" class="card status-card" aria-labelledby="notifications-workspace-heading">
+        <div class="status-header">
+          <div>
+            <h2 id="notifications-workspace-heading">Aggregated Local Notifications &amp; Live Event Feed</h2>
+            <p class="card-subtitle">
+              Deduplicates identical route + fingerprint errors (HTTP 5xx, 502/503/504, upstream timeouts, Nginx warn/error, stopped target containers) within a 5-minute window and streams live updates via WebSocket. HTTP 4xx is excluded by default.
+            </p>
+          </div>
+          <div class="status-badges">
+            <span id="notif-ws-state-badge" class="badge badge-neutral" data-ws-state="connecting">WS: Connecting...</span>
+            <span id="notif-ws-seq-badge" class="badge badge-outline">Cursor seq: 0</span>
+            <span id="notif-open-count-badge" class="badge badge-warning">Open: 0</span>
+            <span id="notif-unack-count-badge" class="badge badge-danger">Unack Open: 0</span>
+            <span id="notif-resolved-count-badge" class="badge badge-success">Resolved: 0</span>
+            <span id="notif-window-badge" class="badge badge-outline">Window: 300s (4xx Excluded)</span>
+          </div>
+        </div>
+
+        <!-- Notifications Subsystem Error / Disconnected Banner (AC-13, Rule 9) -->
+        <div id="notifications-unavailable-box" class="apply-error-box" role="alert" data-error-code="" hidden>
+          <div class="apply-error-details">
+            <strong id="notifications-unavailable-title">Notifications Subsystem Degraded / Disconnected</strong>
+            <p id="notifications-unavailable-message"></p>
+            <span class="rollback-note">Proxy routing, request capture, Modification Rules, Routes, Docker Discovery, Captured Requests, and Draft Replay workspaces remain fully operational.</span>
+          </div>
+          <div class="apply-error-actions">
+            <button type="button" id="retry-notifications-btn" class="btn btn-primary btn-sm">
+              Retry &amp; Resync Notifications
+            </button>
+          </div>
+        </div>
+
+        <!-- Live Feed & Browser System Notification Permission Controls (Rule 7, AC-12) -->
+        <div class="notif-controls-toolbar">
+          <div class="notif-ws-controls">
+            <button type="button" id="notif-ws-reconnect-btn" class="btn btn-secondary btn-sm">
+              Reconnect &amp; Resync Feed
+            </button>
+            <button type="button" id="notif-refresh-btn" class="btn btn-secondary btn-sm">
+              Refresh Incidents
+            </button>
+            <button type="button" id="notif-ack-all-btn" class="btn btn-secondary btn-sm">
+              Acknowledge All Open
+            </button>
+          </div>
+
+          <div class="notif-browser-controls" role="group" aria-label="Browser System Notification Controls">
+            <span id="browser-notif-permission-badge" class="badge badge-neutral" data-permission="default" data-enabled="false">
+              Browser Permission: default (Disabled)
+            </span>
+            <button type="button" id="enable-browser-notif-btn" class="btn btn-primary btn-sm" aria-pressed="false">
+              Enable Browser Notifications
+            </button>
+            <span id="browser-notif-status-text" class="field-hint">
+              System notifications are only requested when you explicitly click Enable.
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Filter & Search Form (AC-8) -->
+      <section class="card" aria-labelledby="notif-filter-heading">
+        <div class="card-header">
+          <h2 id="notif-filter-heading">Filter &amp; Search Incidents</h2>
+        </div>
+        <form id="notif-filter-form" class="filter-bar notif-filter-grid" novalidate>
+          <div class="form-group">
+            <label for="notif-filter-status">Incident Status</label>
+            <select id="notif-filter-status" name="status">
+              <option value="all">All (Open &amp; Resolved)</option>
+              <option value="open">Open Only</option>
+              <option value="resolved">Resolved Only</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="notif-filter-type">Event Type</label>
+            <select id="notif-filter-type" name="event_type">
+              <option value="all">All Event Types</option>
+              <option value="http_500">HTTP 500 / 5xx Application Error (http_500)</option>
+              <option value="http_502_503_504">Gateway 502 / 503 / 504 (http_502_503_504)</option>
+              <option value="upstream_timeout">Upstream Timeout (upstream_timeout)</option>
+              <option value="nginx_warn">Nginx Warning (nginx_warn)</option>
+              <option value="nginx_error">Nginx Error (nginx_error)</option>
+              <option value="container_unavailable">Target / Container Unavailable (container_unavailable)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="notif-filter-route">Route ID / Domain</label>
+            <input
+              type="text"
+              id="notif-filter-route"
+              name="route_id"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="e.g. route:app-a or app-a.local.test"
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="notif-filter-fingerprint">Fingerprint</label>
+            <input
+              type="text"
+              id="notif-filter-fingerprint"
+              name="fingerprint"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="e.g. fp:a1b2c3d4..."
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="notif-filter-ack">Acknowledged</label>
+            <select id="notif-filter-ack" name="acknowledged">
+              <option value="all">All</option>
+              <option value="false">Unacknowledged Only</option>
+              <option value="true">Acknowledged Only</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="notif-filter-since">Since (ISO / Epoch)</label>
+            <input
+              type="text"
+              id="notif-filter-since"
+              name="since"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="e.g. 2026-11-15T00:00:00Z"
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="notif-filter-until">Until (ISO / Epoch)</label>
+            <input
+              type="text"
+              id="notif-filter-until"
+              name="until"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="e.g. 2026-11-15T23:59:59Z"
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="notif-filter-q">Keyword Search</label>
+            <input
+              type="text"
+              id="notif-filter-q"
+              name="q"
+              placeholder="Search reason, route, or incident ID"
+            >
+          </div>
+
+          <div class="filter-actions">
+            <button type="submit" id="notif-filter-apply-btn" class="btn btn-primary btn-sm">
+              Apply Filters
+            </button>
+            <button type="button" id="notif-filter-reset-btn" class="btn btn-secondary btn-sm">
+              Reset Filters
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <div class="rules-workspace-grid notif-workspace-grid">
+        <!-- Left Column: Aggregated Incidents Table -->
+        <section class="card" aria-labelledby="notif-incidents-heading">
+          <div class="card-header">
+            <div>
+              <h2 id="notif-incidents-heading">Aggregated Incidents</h2>
+              <p class="card-subtitle">Select an incident row to inspect its lifecycle timestamps, fingerprint components, recovery state, and event sequence history.</p>
+            </div>
+            <span id="notif-showing-count" class="badge badge-outline">0 incidents</span>
+          </div>
+
+          <div id="notif-incidents-empty" class="empty-state" hidden>
+            <p>No incidents match the current filter criteria.</p>
+          </div>
+
+          <div tabindex="0" role="region" aria-labelledby="notif-incidents-heading" class="table-wrapper rules-table-container" id="notif-table-wrapper">
+            <table id="notif-incidents-table">
+              <caption class="visually-hidden">Aggregated notification incidents ordered by open status and last occurrence</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Status &amp; Ack</th>
+                  <th scope="col">Severity / Event Type</th>
+                  <th scope="col">Route</th>
+                  <th scope="col" class="num-col">Count</th>
+                  <th scope="col">Last / Resolved Time</th>
+                  <th scope="col">Reason &amp; Fingerprint</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="notif-incidents-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Right Column: Incident Detail & Live Event Stream -->
+        <div class="notif-right-column">
+          <section id="notif-detail-card" class="card" aria-labelledby="notif-detail-heading">
+            <div class="card-header">
+              <div>
+                <h2 id="notif-detail-heading">Incident Detail &amp; Recovery Audit</h2>
+                <p class="card-subtitle">Displays normalized event classification, aggregation window metrics, recovery state, and sequence history without exposing request/response bodies or headers.</p>
+              </div>
+              <span id="notif-detail-status-badge" class="badge badge-neutral">None Selected</span>
+            </div>
+
+            <div id="notif-detail-empty" class="empty-state">
+              <p>Select an incident from the table on the left to inspect its details and event timeline.</p>
+            </div>
+
+            <div id="notif-detail-content" hidden>
+              <div class="draft-toolbar">
+                <div class="draft-identity">
+                  <span>Incident: <code id="notif-detail-id">-</code></span>
+                  <span>Fingerprint: <code id="notif-detail-fingerprint">-</code></span>
+                </div>
+                <div class="draft-toolbar-actions">
+                  <button type="button" id="notif-detail-ack-btn" class="btn btn-secondary btn-sm">
+                    Acknowledge
+                  </button>
+                  <button type="button" id="notif-detail-resolve-btn" class="btn btn-primary btn-sm">
+                    Mark Resolved
+                  </button>
+                  <button type="button" id="notif-detail-filter-fp-btn" class="btn btn-secondary btn-sm">
+                    Filter by Fingerprint
+                  </button>
+                </div>
+              </div>
+
+              <dl class="kv-grid notif-detail-kv">
+                <dt>Status</dt>
+                <dd><strong id="notif-detail-status">-</strong></dd>
+                <dt>Severity / Event Type</dt>
+                <dd><span id="notif-detail-severity">-</span> · <code id="notif-detail-type">-</code></dd>
+                <dt>Route / Domain</dt>
+                <dd><code id="notif-detail-route">-</code> (<span id="notif-detail-domain">-</span>)</dd>
+                <dt>Aggregated Count</dt>
+                <dd><strong id="notif-detail-count">1</strong> (Suppressed alerts: <span id="notif-detail-suppressed">0</span> · Cycle #<span id="notif-detail-cycle">1</span> · Window: <span id="notif-detail-window">300</span>s)</dd>
+                <dt>Normalized Reason</dt>
+                <dd><code id="notif-detail-reason">-</code></dd>
+                <dt>Summary Message</dt>
+                <dd id="notif-detail-message">-</dd>
+                <dt>First Seen</dt>
+                <dd><code id="notif-detail-first-seen">-</code></dd>
+                <dt>Last Seen</dt>
+                <dd><code id="notif-detail-last-seen">-</code></dd>
+                <dt>Resolved At</dt>
+                <dd><code id="notif-detail-resolved-at">-</code></dd>
+                <dt>Recovery Reason</dt>
+                <dd><code id="notif-detail-recovery-reason">-</code></dd>
+                <dt>Acknowledged</dt>
+                <dd><span id="notif-detail-ack-state">-</span></dd>
+                <dt>Last Sequence Cursor</dt>
+                <dd><code id="notif-detail-last-seq">0</code></dd>
+              </dl>
+
+              <div class="detail-subsection">
+                <h3>Incident Event Sequence Timeline</h3>
+                <div tabindex="0" role="region" aria-label="Incident event sequence timeline" class="table-wrapper compact-table">
+                  <table id="notif-detail-events-table">
+                    <caption class="visually-hidden">Sequence of initial, count_update, recovery, and acknowledge events for the selected incident</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col" class="num-col">Seq</th>
+                        <th scope="col">Kind</th>
+                        <th scope="col" class="num-col">Count</th>
+                        <th scope="col">Browser Notify</th>
+                        <th scope="col">Occurred At</th>
+                        <th scope="col">Message</th>
+                      </tr>
+                    </thead>
+                    <tbody id="notif-detail-events-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card" aria-labelledby="notif-live-stream-heading">
+            <div class="card-header">
+              <div>
+                <h2 id="notif-live-stream-heading">Live WebSocket Event Stream</h2>
+                <p class="card-subtitle">Real-time monotonic cursor feed (`seq`) of initial, count-update, and recovery events.</p>
+              </div>
+              <span id="notif-stream-count-badge" class="badge badge-outline">0 events</span>
+            </div>
+            <div tabindex="0" role="region" aria-labelledby="notif-live-stream-heading" class="table-wrapper compact-table">
+              <table id="notif-live-stream-table">
+                <caption class="visually-hidden">Recent live notification events ordered by sequence cursor</caption>
+                <thead>
+                  <tr>
+                    <th scope="col" class="num-col">Seq</th>
+                    <th scope="col">Kind</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Route</th>
+                    <th scope="col" class="num-col">Count</th>
+                    <th scope="col">Reason</th>
+                    <th scope="col">Occurred At</th>
+                  </tr>
+                </thead>
+                <tbody id="notif-live-stream-tbody"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
   </main>
+
+  <!-- Screen Reader Live Region & Persistent Toast Notification Stack -->
+  <p class="visually-hidden">Screen reader notification announcements</p>
+  <div id="notif-sr-announcer" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+  <div id="notif-toast-region" role="region" aria-label="Live Notification Alerts" class="notif-toast-region"></div>
 
   <!-- Native Modal Dialog: Copy Route (Requires new non-conflicting domain) -->
   <dialog id="copy-route-dialog" aria-labelledby="copy-dialog-title">

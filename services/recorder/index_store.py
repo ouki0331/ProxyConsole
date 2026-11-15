@@ -30,14 +30,98 @@ from retention import (
 )
 from route_manager import RouteManager
 from rule_engine import RuleEngineManager
+from notification_engine import NotificationEngineManager
 
-INDEX_SCHEMA_VERSION = 6
+INDEX_SCHEMA_VERSION = 7
 MIGRATION_NAME = "001_capture_index.sql"
 RETENTION_MIGRATION_NAME = "002_retention_policy.sql"
 ROUTES_MIGRATION_NAME = "003_routes.sql"
 DISCOVERY_MIGRATION_NAME = "004_discovery.sql"
 DRAFTS_MIGRATION_NAME = "005_request_drafts.sql"
 RULES_MIGRATION_NAME = "006_modification_rules.sql"
+NOTIFICATIONS_MIGRATION_NAME = "007_notifications.sql"
+
+DEFAULT_NOTIFICATIONS_MIGRATION_SQL = """
+CREATE TABLE IF NOT EXISTS notification_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    aggregation_window_seconds INTEGER NOT NULL DEFAULT 300,
+    notify_http_4xx INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notification_incidents (
+    incident_id TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    route_id TEXT NOT NULL,
+    domain TEXT NOT NULL DEFAULT '',
+    normalized_reason TEXT NOT NULL,
+    message TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 1,
+    suppressed_count INTEGER NOT NULL DEFAULT 0,
+    cycle_number INTEGER NOT NULL DEFAULT 1,
+    window_seconds INTEGER NOT NULL DEFAULT 300,
+    window_started_unix REAL NOT NULL,
+    first_seen TEXT NOT NULL,
+    first_seen_unix REAL NOT NULL,
+    last_seen TEXT NOT NULL,
+    last_seen_unix REAL NOT NULL,
+    resolved_at TEXT,
+    resolved_at_unix REAL,
+    recovery_reason TEXT,
+    acknowledged INTEGER NOT NULL DEFAULT 0,
+    acknowledged_at TEXT,
+    last_status_code INTEGER,
+    last_capture_id TEXT,
+    last_seq INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_incidents_lookup
+    ON notification_incidents (route_id, fingerprint, status, window_started_unix DESC);
+
+CREATE INDEX IF NOT EXISTS idx_notification_incidents_status_time
+    ON notification_incidents (status, last_seen_unix DESC, incident_id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_notification_incidents_type
+    ON notification_incidents (event_type, last_seen_unix DESC);
+
+CREATE TABLE IF NOT EXISTS notification_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    incident_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    status TEXT NOT NULL,
+    route_id TEXT NOT NULL,
+    domain TEXT NOT NULL DEFAULT '',
+    fingerprint TEXT NOT NULL,
+    normalized_reason TEXT NOT NULL,
+    message TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    suppressed_count INTEGER NOT NULL DEFAULT 0,
+    notify_browser INTEGER NOT NULL DEFAULT 0,
+    occurred_at TEXT NOT NULL,
+    occurred_at_unix REAL NOT NULL,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    resolved_at TEXT,
+    recovery_reason TEXT,
+    acknowledged INTEGER NOT NULL DEFAULT 0,
+    acknowledged_at TEXT,
+    incident_snapshot_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_events_incident
+    ON notification_events (incident_id, seq ASC);
+
+CREATE INDEX IF NOT EXISTS idx_notification_events_time
+    ON notification_events (occurred_at_unix DESC, seq DESC);
+"""
 
 DEFAULT_RULES_MIGRATION_SQL = """
 CREATE TABLE IF NOT EXISTS modification_rules (
@@ -373,11 +457,18 @@ class CaptureIndexStore:
                 "/app/migrations/006_modification_rules.sql",
             )
         )
+        self.notifications_migration_path = Path(
+            os.environ.get(
+                "NOTIFICATIONS_MIGRATION_FILE",
+                "/app/migrations/007_notifications.sql",
+            )
+        )
         self.retention = RetentionEngine(self)
         self.routes = RouteManager(self)
         self.discovery = DockerDiscoveryService(self)
         self.drafts = DraftReplayManager(self)
         self.rules = RuleEngineManager(self)
+        self.notifications = NotificationEngineManager(self)
 
     @contextlib.contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -418,6 +509,10 @@ class CaptureIndexStore:
         if self.rules_migration_path.is_file():
             sql_text_006 = self.rules_migration_path.read_text(encoding="utf-8")
 
+        sql_text_007 = DEFAULT_NOTIFICATIONS_MIGRATION_SQL
+        if self.notifications_migration_path.is_file():
+            sql_text_007 = self.notifications_migration_path.read_text(encoding="utf-8")
+
         with self._connect() as conn:
             conn.executescript(sql_text_001)
             conn.executescript(sql_text_002)
@@ -425,6 +520,7 @@ class CaptureIndexStore:
             conn.executescript(sql_text_004)
             conn.executescript(sql_text_005)
             conn.executescript(sql_text_006)
+            conn.executescript(sql_text_007)
             route_cols = {
                 r["name"]
                 for r in conn.execute("PRAGMA table_info(routes)").fetchall()
@@ -498,6 +594,23 @@ class CaptureIndexStore:
                 ON CONFLICT(version) DO NOTHING
                 """,
                 (RULES_MIGRATION_NAME, now_iso),
+            )
+            conn.execute(
+                """
+                INSERT INTO schema_migrations (version, name, applied_at)
+                VALUES (7, ?, ?)
+                ON CONFLICT(version) DO NOTHING
+                """,
+                (NOTIFICATIONS_MIGRATION_NAME, now_iso),
+            )
+            conn.execute(
+                """
+                INSERT INTO notification_config (
+                    id, aggregation_window_seconds, notify_http_4xx, updated_at
+                ) VALUES (1, 300, 0, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+                (now_iso,),
             )
             conn.execute(
                 """

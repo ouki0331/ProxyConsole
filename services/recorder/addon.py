@@ -364,6 +364,34 @@ class CaptureRecorderAddon:
                     flush=True,
                 )
 
+            # Notifications observation is fault-isolated (Rule 9): never blocks proxy routing or capture
+            try:
+                resp_hdr_map = (
+                    {
+                        k.decode("latin-1", errors="replace").lower(): v.decode(
+                            "latin-1", errors="replace"
+                        )
+                        for k, v in resp.headers.fields
+                    }
+                    if resp is not None
+                    else {}
+                )
+                self.index_store.notifications.observe_http_flow(
+                    route_id=record["route_id"],
+                    authority=authority,
+                    raw_path=raw_path,
+                    response_status=resp.status_code if resp is not None else None,
+                    proxy_error=proxy_error,
+                    response_headers=resp_hdr_map,
+                    duration_ms=duration_ms,
+                    capture_id=capture_id,
+                )
+            except Exception as notif_exc:
+                print(
+                    f"[recorder] notification observation warning (non-fatal): {notif_exc}",
+                    flush=True,
+                )
+
             if resp is not None:
                 resp.headers["X-Capture-Id"] = capture_id
                 resp.headers["X-Capture-Status"] = capture_status

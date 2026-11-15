@@ -4,8 +4,8 @@ Updated: 2026-11-15
 Phase: P5
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 pending
 Active task: DEV-042
-Task status: In progress
-Owner: implementer
+Task status: Ready for review
+Owner: orchestrator
 Last verified commit: `b7f53cf` (DEV-041 approved by independent review 001; all 11 integration/browser E2E suites verified)
 Last substantive remote progress: `b7f53cf` (DEV-041 Web automatic modification rule management console implemented and independently verified)
 Task definition baseline: `a7be859`
@@ -27,11 +27,11 @@ Mailbox dispatch: `13` (`.agents/dispatch.json`)
 - DEV-031 は独立機能 review に合格し、G4 を通過した。
 - DEV-040 は独立機能 review 002 に合格し、`Done` となった。
 - DEV-041 は独立機能 review 001 に合格し、`Done` となった。
-- DEV-042 Aggregated local notifications and live event feed（event classification、5分集約、recovery、durable history、WebSocket feed、Notifications workspace、browser notification）を dispatch 13 で開始した。
+- DEV-042 Aggregated local notifications and live event feed（event classification、5分集約、recovery、durable history、WebSocket feed、Notifications workspace、browser notification）の実装と全12統合・ブラウザ E2E 検証が完了し、`Ready for review` となった。
 
 ## Next transition
 
-implementer が dispatch 13 を受領し、DEV-042 を実装・検証して `Ready for review` にする。
+orchestrator が DEV-042 の独立機能レビュー（G5 判定を含む）を実施する。
 
 ## Blocking items
 

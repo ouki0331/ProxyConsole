@@ -3,10 +3,14 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 from pathlib import Path
+import select
 import signal
+import struct
 import sys
 import threading
 import time
@@ -26,6 +30,11 @@ from draft_replay import (
     NonReplayableCaptureError,
 )
 from index_store import CaptureIndexStore
+from notification_engine import (
+    NotificationNotFoundError,
+    NotificationsUnavailableError,
+    NotificationValidationError,
+)
 from route_manager import (
     DuplicateDomainError,
     RouteNotFoundError,
@@ -36,6 +45,45 @@ from rule_engine import (
     RulesUnavailableError,
     RuleValidationError,
 )
+
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def _read_ws_frame(rfile: Any) -> tuple[int, bytes] | None:
+    header = rfile.read(2)
+    if not header or len(header) < 2:
+        return None
+    b1, b2 = header[0], header[1]
+    opcode = b1 & 0x0F
+    masked = (b2 & 0x80) != 0
+    length = b2 & 0x7F
+    if length == 126:
+        ext = rfile.read(2)
+        if not ext or len(ext) < 2:
+            return None
+        length = struct.unpack("!H", ext)[0]
+    elif length == 127:
+        ext = rfile.read(8)
+        if not ext or len(ext) < 8:
+            return None
+        length = struct.unpack("!Q", ext)[0]
+    mask_key = rfile.read(4) if masked else b""
+    payload = rfile.read(length) if length > 0 else b""
+    if masked and mask_key:
+        payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+    return opcode, payload
+
+
+def _build_ws_frame(opcode: int, payload: bytes) -> bytes:
+    first_byte = 0x80 | (opcode & 0x0F)
+    length = len(payload)
+    if length < 126:
+        header = bytes([first_byte, length])
+    elif length < 65536:
+        header = bytes([first_byte, 126]) + struct.pack("!H", length)
+    else:
+        header = bytes([first_byte, 127]) + struct.pack("!Q", length)
+    return header + payload
 
 API_HOST = os.environ.get("CONTROL_API_LISTEN_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("CONTROL_API_PORT", "18480"))
@@ -486,9 +534,120 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                     )
                 return
 
+            if path in ("/api/v1/notifications/ws", "/ws/notifications"):
+                self._handle_notifications_ws(qs)
+                return
+
+            if path == "/api/v1/notifications/status":
+                self._send_json(200, self.store.notifications.get_status())
+                return
+
+            if path == "/api/v1/notifications/config":
+                self._send_json(200, self.store.notifications.get_config())
+                return
+
+            if path == "/api/v1/notifications/incidents":
+                status_filter = _first_param(qs, "status")
+                event_type = _first_param(qs, "event_type") or _first_param(qs, "type")
+                route_id = _first_param(qs, "route_id") or _first_param(qs, "route")
+                fingerprint = _first_param(qs, "fingerprint")
+                ack_str = _first_param(qs, "acknowledged")
+                ack_filter = (
+                    _parse_bool(ack_str) if ack_str is not None else None
+                )
+                since = (
+                    _first_param(qs, "since")
+                    or _first_param(qs, "from")
+                    or _first_param(qs, "start_time")
+                )
+                until = (
+                    _first_param(qs, "until")
+                    or _first_param(qs, "to")
+                    or _first_param(qs, "end_time")
+                )
+                q_str = _first_param(qs, "q") or _first_param(qs, "search")
+                limit_str = _first_param(qs, "limit")
+                offset_str = _first_param(qs, "offset")
+                limit = int(limit_str) if limit_str is not None else 100
+                offset = int(offset_str) if offset_str is not None else 0
+                self._send_json(
+                    200,
+                    self.store.notifications.list_incidents(
+                        status=status_filter,
+                        event_type=event_type,
+                        route_id=route_id,
+                        fingerprint=fingerprint,
+                        acknowledged=ack_filter,
+                        since=since,
+                        until=until,
+                        q=q_str,
+                        limit=limit,
+                        offset=offset,
+                    ),
+                )
+                return
+
+            if path.startswith("/api/v1/notifications/incidents/"):
+                inc_id = unquote(path[len("/api/v1/notifications/incidents/") :])
+                self._send_json(200, self.store.notifications.get_incident(inc_id))
+                return
+
+            if path == "/api/v1/notifications/events":
+                seq_str = _first_param(qs, "since_seq") or _first_param(qs, "cursor")
+                since_seq = int(seq_str) if seq_str is not None else None
+                inc_id = _first_param(qs, "incident_id")
+                status_filter = _first_param(qs, "status")
+                event_type = _first_param(qs, "event_type") or _first_param(qs, "type")
+                route_id = _first_param(qs, "route_id") or _first_param(qs, "route")
+                fingerprint = _first_param(qs, "fingerprint")
+                kind = _first_param(qs, "kind")
+                since = (
+                    _first_param(qs, "since")
+                    or _first_param(qs, "from")
+                    or _first_param(qs, "start_time")
+                )
+                until = (
+                    _first_param(qs, "until")
+                    or _first_param(qs, "to")
+                    or _first_param(qs, "end_time")
+                )
+                limit_str = _first_param(qs, "limit")
+                limit = int(limit_str) if limit_str is not None else 200
+                self._send_json(
+                    200,
+                    self.store.notifications.list_events(
+                        since_seq=since_seq,
+                        incident_id=inc_id,
+                        status=status_filter,
+                        event_type=event_type,
+                        route_id=route_id,
+                        fingerprint=fingerprint,
+                        kind=kind,
+                        since=since,
+                        until=until,
+                        limit=limit,
+                    ),
+                )
+                return
+
             self._send_json(
                 404,
                 {"error": "not_found", "path": path},
+            )
+        except NotificationsUnavailableError as exc:
+            self._send_json(
+                503,
+                {"error": "notifications_unavailable", "message": str(exc)},
+            )
+        except NotificationNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "incident_not_found", "message": str(exc)},
+            )
+        except NotificationValidationError as exc:
+            self._send_json(
+                400,
+                {"error": exc.code, "message": str(exc), **exc.details},
             )
         except RulesUnavailableError as exc:
             self._send_json(
@@ -505,6 +664,138 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 500,
                 {"error": "internal_error", "message": str(exc)},
             )
+
+    def _handle_notifications_ws(self, qs: dict[str, list[str]]) -> None:
+        ws_Gen = self.store.notifications.check_ws_available()
+        upgrade_hdr = (self.headers.get("Upgrade") or "").strip().lower()
+        ws_key = (self.headers.get("Sec-WebSocket-Key") or "").strip()
+        if upgrade_hdr != "websocket" or not ws_key:
+            self._send_json(
+                400,
+                {
+                    "error": "websocket_upgrade_required",
+                    "message": "Upgrade: websocket and Sec-WebSocket-Key headers are required",
+                },
+            )
+            return
+
+        seq_str = _first_param(qs, "since_seq") or _first_param(qs, "cursor")
+        client_seq = int(seq_str) if seq_str is not None else 0
+
+        accept_raw = hashlib.sha1((ws_key + WS_GUID).encode("ascii")).digest()
+        accept_val = base64.b64encode(accept_raw).decode("ascii")
+
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept_val)
+        self.end_headers()
+        self.wfile.flush()
+
+        try:
+            # Send initial sync frame with any missed events since client_seq
+            missed = self.store.notifications.list_events(
+                since_seq=client_seq, limit=500
+            )
+            latest_seq = int(missed["latest_seq"])
+            sync_payload = json.dumps(
+                {
+                    "type": "sync",
+                    "since_seq": client_seq,
+                    "latest_seq": latest_seq,
+                    "events": missed["items"],
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            self.wfile.write(_build_ws_frame(0x1, sync_payload))
+            self.wfile.flush()
+            if missed["items"]:
+                client_seq = max(client_seq, int(missed["items"][-1]["seq"]))
+            else:
+                client_seq = max(client_seq, latest_seq)
+
+            while True:
+                # Check if failure simulation or explicit drop was requested
+                try:
+                    cur_gen = self.store.notifications.check_ws_available()
+                    if cur_gen != ws_Gen:
+                        self.wfile.write(_build_ws_frame(0x8, b""))
+                        self.wfile.flush()
+                        break
+                except NotificationsUnavailableError:
+                    self.wfile.write(_build_ws_frame(0x8, b""))
+                    self.wfile.flush()
+                    break
+
+                # Check for new events in SQLite
+                new_ev = self.store.notifications.list_events(
+                    since_seq=client_seq, limit=200
+                )
+                for ev in new_ev["items"]:
+                    ev_seq = int(ev["seq"])
+                    frame_bytes = json.dumps(
+                        {
+                            "type": "notification_event",
+                            "seq": ev_seq,
+                            "cursor": ev_seq,
+                            "event": ev,
+                            "incident": ev["incident"],
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    self.wfile.write(_build_ws_frame(0x1, frame_bytes))
+                    self.wfile.flush()
+                    client_seq = max(client_seq, ev_seq)
+
+                rlist, _, _ = select.select([self.connection], [], [], 0.12)
+                if rlist:
+                    frame = _read_ws_frame(self.rfile)
+                    if frame is None:
+                        break
+                    opcode, payload = frame
+                    if opcode == 0x8:  # Close
+                        self.wfile.write(_build_ws_frame(0x8, b""))
+                        self.wfile.flush()
+                        break
+                    elif opcode == 0x9:  # Ping
+                        self.wfile.write(_build_ws_frame(0xA, payload))
+                        self.wfile.flush()
+                    elif opcode == 0x1:  # Text command (e.g. resync or ping)
+                        try:
+                            cmd = json.loads(payload.decode("utf-8", errors="replace"))
+                            if isinstance(cmd, dict):
+                                if cmd.get("action") == "ping":
+                                    pong_bytes = json.dumps(
+                                        {"type": "pong", "latest_seq": client_seq}
+                                    ).encode("utf-8")
+                                    self.wfile.write(_build_ws_frame(0x1, pong_bytes))
+                                    self.wfile.flush()
+                                elif cmd.get("action") == "resync":
+                                    req_seq = int(cmd.get("since_seq", 0))
+                                    resync_data = self.store.notifications.list_events(
+                                        since_seq=req_seq, limit=500
+                                    )
+                                    resync_bytes = json.dumps(
+                                        {
+                                            "type": "sync",
+                                            "since_seq": req_seq,
+                                            "latest_seq": resync_data["latest_seq"],
+                                            "events": resync_data["items"],
+                                        },
+                                        ensure_ascii=False,
+                                        separators=(",", ":"),
+                                    ).encode("utf-8")
+                                    self.wfile.write(_build_ws_frame(0x1, resync_bytes))
+                                    self.wfile.flush()
+                                    client_seq = max(
+                                        client_seq, int(resync_data["latest_seq"])
+                                    )
+                        except Exception:
+                            pass
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
     def _handle_policy_update(self) -> None:
         body = self._read_json_body()
@@ -618,7 +909,27 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 res = self.store.drafts.update_draft(draft_id, body)
                 self._send_json(200, res)
                 return
+            if path == "/api/v1/notifications/config":
+                body = self._read_json_body()
+                res = self.store.notifications.update_config(body)
+                self._send_json(200, res)
+                return
             self._send_json(404, {"error": "not_found", "path": path})
+        except NotificationsUnavailableError as exc:
+            self._send_json(
+                503,
+                {"error": "notifications_unavailable", "message": str(exc)},
+            )
+        except NotificationNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "incident_not_found", "message": str(exc)},
+            )
+        except NotificationValidationError as exc:
+            self._send_json(
+                400,
+                {"error": exc.code, "message": str(exc), **exc.details},
+            )
         except RulesUnavailableError as exc:
             self._send_json(
                 503,
@@ -1156,7 +1467,127 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 self._send_json(200, res)
                 return
 
+            if path == "/api/v1/notifications/config":
+                res = self.store.notifications.update_config(body)
+                self._send_json(200, res)
+                return
+
+            if path == "/api/v1/notifications/acknowledge-all":
+                status_filter = body.get("status")
+                res = self.store.notifications.acknowledge_all(
+                    status=str(status_filter) if status_filter else None
+                )
+                self._send_json(200, res)
+                return
+
+            if (
+                path.startswith("/api/v1/notifications/incidents/")
+                and path.endswith("/acknowledge")
+            ):
+                inc_id = unquote(
+                    path[len("/api/v1/notifications/incidents/") : -len("/acknowledge")]
+                )
+                ack_val = (
+                    _parse_bool(body["acknowledged"])
+                    if "acknowledged" in body and body["acknowledged"] is not None
+                    else True
+                )
+                res = self.store.notifications.acknowledge_incident(
+                    inc_id, acknowledged=ack_val
+                )
+                self._send_json(200, res)
+                return
+
+            if (
+                path.startswith("/api/v1/notifications/incidents/")
+                and path.endswith("/resolve")
+            ):
+                inc_id = unquote(
+                    path[len("/api/v1/notifications/incidents/") : -len("/resolve")]
+                )
+                reason = str(body.get("recovery_reason") or body.get("reason") or "manual_resolve")
+                res = self.store.notifications.resolve_incident(
+                    inc_id,
+                    recovery_reason=reason,
+                    resolved_at=body.get("resolved_at"),
+                )
+                self._send_json(200, res)
+                return
+
+            if path in ("/api/v1/notifications/recover", "/api/v1/notifications/resolve"):
+                inc_id = body.get("incident_id")
+                reason = str(body.get("recovery_reason") or body.get("reason") or "upstream_recovered")
+                if inc_id:
+                    res = self.store.notifications.resolve_incident(
+                        str(inc_id),
+                        recovery_reason=reason,
+                        resolved_at=body.get("resolved_at"),
+                    )
+                else:
+                    ev_types = body.get("event_types")
+                    if not ev_types and body.get("event_type"):
+                        ev_types = [str(body["event_type"])]
+                    res = self.store.notifications.resolve_open_incidents(
+                        route_id=body.get("route_id"),
+                        fingerprint=body.get("fingerprint"),
+                        event_types=ev_types,
+                        recovery_reason=reason,
+                        resolved_at=body.get("resolved_at"),
+                    )
+                self._send_json(200, res)
+                return
+
+            if path == "/api/v1/notifications/ingest":
+                self.store.notifications.check_api_available()
+                if "nginx_log_line" in body and body["nginx_log_line"]:
+                    res = self.store.notifications.ingest_nginx_log_line(
+                        str(body["nginx_log_line"]),
+                        route_id=body.get("route_id"),
+                        occurred_at=body.get("occurred_at"),
+                    )
+                    self._send_json(200, res or {"ignored": True, "reason": "unrecognized_nginx_log_line"})
+                    return
+                if "nginx_log_text" in body and body["nginx_log_text"]:
+                    items = self.store.notifications.ingest_nginx_log_text(
+                        str(body["nginx_log_text"]),
+                        route_id=body.get("route_id"),
+                    )
+                    self._send_json(200, {"count": len(items), "items": items})
+                    return
+                res = self.store.notifications.record_normalized_event(
+                    event_type=str(body.get("event_type") or ""),
+                    route_id=str(body.get("route_id") or "route:unknown"),
+                    reason=str(body.get("reason") or body.get("normalized_reason") or ""),
+                    domain=str(body.get("domain") or ""),
+                    severity=body.get("severity"),
+                    message=body.get("message"),
+                    status_code=(
+                        int(body["status_code"])
+                        if body.get("status_code") is not None
+                        else None
+                    ),
+                    capture_id=body.get("capture_id"),
+                    occurred_at=body.get("occurred_at"),
+                )
+                self._send_json(200, res)
+                return
+
             self._send_json(404, {"error": "not_found", "path": path})
+        except NotificationsUnavailableError as exc:
+            self._send_json(
+                503,
+                {"error": "notifications_unavailable", "message": str(exc)},
+            )
+        except NotificationNotFoundError as exc:
+            self._send_json(
+                404,
+                {"error": "incident_not_found", "message": str(exc)},
+            )
+        except NotificationValidationError as exc:
+            self._send_json(
+                400,
+                {"error": exc.code, "message": str(exc), **exc.details},
+            )
         except FileNotFoundError as exc:
             self._send_json(
                 404,
@@ -1284,6 +1715,18 @@ def _periodic_retention_worker(store: CaptureIndexStore) -> None:
             time.sleep(1.0)
 
 
+def _notification_monitor_worker(store: CaptureIndexStore) -> None:
+    while True:
+        try:
+            store.notifications.poll_router_logs_and_containers()
+        except Exception as exc:
+            print(
+                f"[control-api] notification monitor warning (non-fatal): {exc}",
+                flush=True,
+            )
+        time.sleep(0.5)
+
+
 def main() -> None:
     signal.signal(signal.SIGTERM, lambda _signum, _frame: sys.exit(0))
     signal.signal(signal.SIGINT, lambda _signum, _frame: sys.exit(0))
@@ -1302,7 +1745,16 @@ def main() -> None:
     )
     worker.start()
 
+    notif_worker = threading.Thread(
+        target=_notification_monitor_worker,
+        args=(store,),
+        name="notification-monitor",
+        daemon=True,
+    )
+    notif_worker.start()
+
     server = ThreadingHTTPServer((API_HOST, API_PORT), CaptureApiHandler)
+    server.daemon_threads = True
     print(f"[control-api] listening on {API_HOST}:{API_PORT}", flush=True)
     server.serve_forever()
 

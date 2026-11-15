@@ -35,6 +35,28 @@ const appState = {
   deleteTargetRule: null,
   pendingRuleDiscardCallback: null,
   lastRulePreviewResult: null,
+  // DEV-042 state
+  notificationsAvailable: true,
+  notificationsError: null,
+  notifStatus: null,
+  incidents: [],
+  incidentsTotal: 0,
+  selectedIncidentId: null,
+  selectedIncident: null,
+  selectedIncidentEvents: [],
+  liveStreamEvents: [],
+  notifLatestSeq: 0,
+  notifInitialLoadSeq: null,
+  notifProcessedSeqs: new Set(),
+  notifBrowserNotifiedSeqs: new Set(),
+  wsState: "connecting",
+  wsSocket: null,
+  wsReconnectTimer: null,
+  wsReconnectAttempts: 0,
+  browserNotifEnabled: false,
+  browserNotifPermission: "default",
+  browserNotifSentCount: 0,
+  browserNotifHistory: [],
 };
 
 function beginOp() {
@@ -609,6 +631,7 @@ async function loadAllState({
       loadCapturesList({ preserveBanner: true }),
       loadSavedDraftsList({ preserveBanner: true }),
       loadRulesList({ preserveBanner: true }),
+      loadNotificationsState({ preserveBanner: true }),
     ]);
 
     if (!preserveBanner) {
@@ -1217,9 +1240,11 @@ const viewAllBtn = document.getElementById("view-all-btn");
 const viewRoutesBtn = document.getElementById("view-routes-btn");
 const viewRequestsBtn = document.getElementById("view-requests-btn");
 const viewRulesBtn = document.getElementById("view-rules-btn");
+const viewNotificationsBtn = document.getElementById("view-notifications-btn");
 const routesWorkspace = document.getElementById("routes-workspace");
 const requestsWorkspace = document.getElementById("requests-workspace");
 const rulesWorkspace = document.getElementById("rules-workspace");
+const notificationsWorkspace = document.getElementById("notifications-workspace");
 
 const capturesTotalBadge = document.getElementById("captures-total-badge");
 const refreshCapturesBtn = document.getElementById("refresh-captures-btn");
@@ -1393,10 +1418,19 @@ function setWorkspaceView(mode) {
   if (viewRulesBtn) {
     viewRulesBtn.setAttribute("aria-pressed", String(mode === "rules"));
   }
+  if (viewNotificationsBtn) {
+    viewNotificationsBtn.setAttribute(
+      "aria-pressed",
+      String(mode === "notifications")
+    );
+  }
   routesWorkspace.hidden = mode !== "all" && mode !== "routes";
   requestsWorkspace.hidden = mode !== "all" && mode !== "requests";
   if (rulesWorkspace) {
     rulesWorkspace.hidden = mode !== "all" && mode !== "rules";
+  }
+  if (notificationsWorkspace) {
+    notificationsWorkspace.hidden = mode !== "all" && mode !== "notifications";
   }
 }
 
@@ -1405,6 +1439,11 @@ viewRoutesBtn.addEventListener("click", () => setWorkspaceView("routes"));
 viewRequestsBtn.addEventListener("click", () => setWorkspaceView("requests"));
 if (viewRulesBtn) {
   viewRulesBtn.addEventListener("click", () => setWorkspaceView("rules"));
+}
+if (viewNotificationsBtn) {
+  viewNotificationsBtn.addEventListener("click", () =>
+    setWorkspaceView("notifications")
+  );
 }
 
 function buildCapturesQueryString() {
@@ -5147,6 +5186,1651 @@ renderEditablePairList(
 syncPreviewSourceModeUI();
 syncPreviewInlineBodyModeUI();
 resetRuleForm();
+
+// ================================================================
+// DEV-042: Aggregated Local Notifications & Live Event Feed
+// ================================================================
+const wsFeedStatusBadge = document.getElementById("ws-feed-status-badge");
+const notifOpenBadge = document.getElementById("notif-open-badge");
+const notifWsStateBadge = document.getElementById("notif-ws-state-badge");
+const notifWsSeqBadge = document.getElementById("notif-ws-seq-badge");
+const notifOpenCountBadge = document.getElementById("notif-open-count-badge");
+const notifUnackCountBadge = document.getElementById("notif-unack-count-badge");
+const notifResolvedCountBadge = document.getElementById(
+  "notif-resolved-count-badge"
+);
+const notifWindowBadge = document.getElementById("notif-window-badge");
+
+const notificationsUnavailableBox = document.getElementById(
+  "notifications-unavailable-box"
+);
+const notificationsUnavailableTitle = document.getElementById(
+  "notifications-unavailable-title"
+);
+const notificationsUnavailableMessage = document.getElementById(
+  "notifications-unavailable-message"
+);
+const retryNotificationsBtn = document.getElementById(
+  "retry-notifications-btn"
+);
+
+const notifWsReconnectBtn = document.getElementById("notif-ws-reconnect-btn");
+const notifRefreshBtn = document.getElementById("notif-refresh-btn");
+const notifAckAllBtn = document.getElementById("notif-ack-all-btn");
+
+const browserNotifPermissionBadge = document.getElementById(
+  "browser-notif-permission-badge"
+);
+const enableBrowserNotifBtn = document.getElementById(
+  "enable-browser-notif-btn"
+);
+const browserNotifStatusText = document.getElementById(
+  "browser-notif-status-text"
+);
+
+const notifFilterForm = document.getElementById("notif-filter-form");
+const notifFilterStatus = document.getElementById("notif-filter-status");
+const notifFilterType = document.getElementById("notif-filter-type");
+const notifFilterRoute = document.getElementById("notif-filter-route");
+const notifFilterFingerprint = document.getElementById(
+  "notif-filter-fingerprint"
+);
+const notifFilterAck = document.getElementById("notif-filter-ack");
+const notifFilterSince = document.getElementById("notif-filter-since");
+const notifFilterUntil = document.getElementById("notif-filter-until");
+const notifFilterQ = document.getElementById("notif-filter-q");
+const notifFilterResetBtn = document.getElementById("notif-filter-reset-btn");
+
+const notifShowingCount = document.getElementById("notif-showing-count");
+const notifIncidentsEmpty = document.getElementById("notif-incidents-empty");
+const notifIncidentsTbody = document.getElementById("notif-incidents-tbody");
+
+const notifDetailStatusBadge = document.getElementById(
+  "notif-detail-status-badge"
+);
+const notifDetailEmpty = document.getElementById("notif-detail-empty");
+const notifDetailContent = document.getElementById("notif-detail-content");
+const notifDetailId = document.getElementById("notif-detail-id");
+const notifDetailFingerprint = document.getElementById(
+  "notif-detail-fingerprint"
+);
+const notifDetailAckBtn = document.getElementById("notif-detail-ack-btn");
+const notifDetailResolveBtn = document.getElementById(
+  "notif-detail-resolve-btn"
+);
+const notifDetailFilterFpBtn = document.getElementById(
+  "notif-detail-filter-fp-btn"
+);
+const notifDetailStatus = document.getElementById("notif-detail-status");
+const notifDetailSeverity = document.getElementById("notif-detail-severity");
+const notifDetailType = document.getElementById("notif-detail-type");
+const notifDetailRoute = document.getElementById("notif-detail-route");
+const notifDetailDomain = document.getElementById("notif-detail-domain");
+const notifDetailCount = document.getElementById("notif-detail-count");
+const notifDetailSuppressed = document.getElementById(
+  "notif-detail-suppressed"
+);
+const notifDetailCycle = document.getElementById("notif-detail-cycle");
+const notifDetailWindow = document.getElementById("notif-detail-window");
+const notifDetailReason = document.getElementById("notif-detail-reason");
+const notifDetailMessage = document.getElementById("notif-detail-message");
+const notifDetailFirstSeen = document.getElementById("notif-detail-first-seen");
+const notifDetailLastSeen = document.getElementById("notif-detail-last-seen");
+const notifDetailResolvedAt = document.getElementById(
+  "notif-detail-resolved-at"
+);
+const notifDetailRecoveryReason = document.getElementById(
+  "notif-detail-recovery-reason"
+);
+const notifDetailAckState = document.getElementById("notif-detail-ack-state");
+const notifDetailLastSeq = document.getElementById("notif-detail-last-seq");
+const notifDetailEventsTbody = document.getElementById(
+  "notif-detail-events-tbody"
+);
+
+const notifStreamCountBadge = document.getElementById(
+  "notif-stream-count-badge"
+);
+const notifLiveStreamTbody = document.getElementById("notif-live-stream-tbody");
+
+const notifSrAnnouncer = document.getElementById("notif-sr-announcer");
+const notifToastRegion = document.getElementById("notif-toast-region");
+
+window.__pcNotificationsState = {
+  get wsState() {
+    return appState.wsState;
+  },
+  get latestSeq() {
+    return appState.notifLatestSeq;
+  },
+  get processedSeqCount() {
+    return appState.notifProcessedSeqs.size;
+  },
+  get browserPermission() {
+    return getBrowserNotificationPermission();
+  },
+  get browserEnabled() {
+    return appState.browserNotifEnabled;
+  },
+  get browserSentCount() {
+    return appState.browserNotifSentCount;
+  },
+  get browserHistory() {
+    return appState.browserNotifHistory.slice();
+  },
+  deliverEvent(ev) {
+    return handleIncomingNotificationEvent(ev, { isLive: true });
+  },
+};
+
+function getBrowserNotificationPermission() {
+  if (typeof window === "undefined" || !("Notification" in window) || !window.Notification) {
+    return "unsupported";
+  }
+  try {
+    return window.Notification.permission || "default";
+  } catch (_err) {
+    return "unsupported";
+  }
+}
+
+function syncBrowserNotificationUI() {
+  const perm = getBrowserNotificationPermission();
+  appState.browserNotifPermission = perm;
+  if (perm !== "granted") {
+    appState.browserNotifEnabled = false;
+  }
+
+  if (browserNotifPermissionBadge) {
+    browserNotifPermissionBadge.dataset.permission = perm;
+    browserNotifPermissionBadge.dataset.enabled = String(
+      Boolean(appState.browserNotifEnabled)
+    );
+    browserNotifPermissionBadge.dataset.sentCount = String(
+      appState.browserNotifSentCount
+    );
+    if (perm === "granted" && appState.browserNotifEnabled) {
+      browserNotifPermissionBadge.className = "badge badge-success";
+      browserNotifPermissionBadge.textContent = `Browser Permission: granted (Enabled · ${appState.browserNotifSentCount} sent)`;
+    } else if (perm === "granted") {
+      browserNotifPermissionBadge.className = "badge badge-outline";
+      browserNotifPermissionBadge.textContent =
+        "Browser Permission: granted (Paused)";
+    } else if (perm === "denied") {
+      browserNotifPermissionBadge.className = "badge badge-danger";
+      browserNotifPermissionBadge.textContent =
+        "Browser Permission: denied (In-Page Feed Active)";
+    } else if (perm === "unsupported") {
+      browserNotifPermissionBadge.className = "badge badge-warning";
+      browserNotifPermissionBadge.textContent =
+        "Browser Permission: unsupported (In-Page Feed Active)";
+    } else {
+      browserNotifPermissionBadge.className = "badge badge-neutral";
+      browserNotifPermissionBadge.textContent =
+        "Browser Permission: default (Disabled)";
+    }
+  }
+
+  if (enableBrowserNotifBtn) {
+    enableBrowserNotifBtn.setAttribute(
+      "aria-pressed",
+      String(Boolean(appState.browserNotifEnabled))
+    );
+    enableBrowserNotifBtn.dataset.permission = perm;
+    enableBrowserNotifBtn.dataset.enabled = String(
+      Boolean(appState.browserNotifEnabled)
+    );
+    enableBrowserNotifBtn.dataset.sentCount = String(
+      appState.browserNotifSentCount
+    );
+    if (perm === "granted" && appState.browserNotifEnabled) {
+      enableBrowserNotifBtn.textContent = "Disable Browser Notifications";
+    } else if (perm === "granted") {
+      enableBrowserNotifBtn.textContent = "Enable Browser Notifications";
+    } else if (perm === "denied") {
+      enableBrowserNotifBtn.textContent = "Browser Notifications Blocked";
+    } else if (perm === "unsupported") {
+      enableBrowserNotifBtn.textContent = "Browser Notifications Unsupported";
+    } else {
+      enableBrowserNotifBtn.textContent = "Enable Browser Notifications";
+    }
+  }
+
+  if (browserNotifStatusText) {
+    if (perm === "granted" && appState.browserNotifEnabled) {
+      browserNotifStatusText.textContent =
+        "Browser notifications active for initial alerts, milestone counts, and recoveries.";
+    } else if (perm === "denied") {
+      browserNotifStatusText.textContent =
+        "Permission denied in browser settings. In-page live feed and incident aggregation remain fully operational.";
+    } else if (perm === "unsupported") {
+      browserNotifStatusText.textContent =
+        "Notification API is unsupported in this browser context. In-page live feed remains fully operational.";
+    } else {
+      browserNotifStatusText.textContent =
+        "System notifications are only requested when you explicitly click Enable.";
+    }
+  }
+}
+
+async function handleEnableBrowserNotificationsClick() {
+  const permBefore = getBrowserNotificationPermission();
+  if (permBefore === "unsupported") {
+    appState.browserNotifEnabled = false;
+    syncBrowserNotificationUI();
+    setFeedback(
+      "idle",
+      "Browser Notifications Unsupported",
+      "This browser environment does not support the Notification API. The in-page live event feed remains active."
+    );
+    return;
+  }
+
+  if (permBefore === "denied") {
+    appState.browserNotifEnabled = false;
+    syncBrowserNotificationUI();
+    setFeedback(
+      "idle",
+      "Browser Notification Permission Denied",
+      "Browser notification permission is denied. In-page live notifications continue working normally."
+    );
+    return;
+  }
+
+  if (permBefore === "granted") {
+    appState.browserNotifEnabled = !appState.browserNotifEnabled;
+    syncBrowserNotificationUI();
+    setFeedback(
+      "idle",
+      appState.browserNotifEnabled
+        ? "Browser Notifications Enabled"
+        : "Browser Notifications Paused",
+      appState.browserNotifEnabled
+        ? "System notifications will be shown for initial occurrences, count milestones, and recoveries."
+        : "Paused browser system notifications; in-page live feed remains active."
+    );
+    return;
+  }
+
+  // Permission is "default": request explicitly from user click gesture (Rule 7)
+  try {
+    let result = "default";
+    const reqRes = window.Notification.requestPermission();
+    if (reqRes && typeof reqRes.then === "function") {
+      result = await reqRes;
+    } else if (typeof reqRes === "string") {
+      result = reqRes;
+    } else {
+      result = getBrowserNotificationPermission();
+    }
+    appState.browserNotifPermission = result;
+    appState.browserNotifEnabled = result === "granted";
+    syncBrowserNotificationUI();
+    setFeedback(
+      "idle",
+      result === "granted"
+        ? "Browser Notifications Enabled"
+        : `Browser Permission: ${result}`,
+      result === "granted"
+        ? "Browser notification permission granted. System alerts are now active."
+        : `Notification permission is '${result}'. In-page live event feed continues to operate normally.`
+    );
+  } catch (err) {
+    appState.browserNotifEnabled = false;
+    syncBrowserNotificationUI();
+    setFeedback(
+      "idle",
+      "Browser Notification Request Handled",
+      `Could not enable browser notifications (${err.message || "permission error"}). In-page feed remains active.`
+    );
+  }
+}
+
+function setWsFeedState(state, detailMessage = "") {
+  appState.wsState = state;
+  const labelMap = {
+    connected: "WS: Connected",
+    connecting: "WS: Connecting...",
+    reconnecting: "WS: Reconnecting...",
+    disconnected: "WS: Disconnected",
+    error: "WS: Error",
+  };
+  const badgeClassMap = {
+    connected: "badge badge-success",
+    connecting: "badge badge-neutral",
+    reconnecting: "badge badge-warning",
+    disconnected: "badge badge-danger",
+    error: "badge badge-danger",
+  };
+  const text = labelMap[state] || `WS: ${state}`;
+  const cls = badgeClassMap[state] || "badge badge-neutral";
+
+  if (wsFeedStatusBadge) {
+    wsFeedStatusBadge.dataset.wsState = state;
+    wsFeedStatusBadge.dataset.latestSeq = String(appState.notifLatestSeq);
+    wsFeedStatusBadge.className = cls;
+    wsFeedStatusBadge.textContent =
+      state === "connected" ? "Live Feed: Connected" : `Live Feed: ${state}`;
+  }
+  if (notifWsStateBadge) {
+    notifWsStateBadge.dataset.wsState = state;
+    notifWsStateBadge.dataset.latestSeq = String(appState.notifLatestSeq);
+    notifWsStateBadge.className = cls;
+    notifWsStateBadge.textContent = detailMessage
+      ? `${text} (${detailMessage})`
+      : text;
+  }
+  if (notifWsSeqBadge) {
+    notifWsSeqBadge.dataset.latestSeq = String(appState.notifLatestSeq);
+    notifWsSeqBadge.textContent = `Cursor seq: ${appState.notifLatestSeq}`;
+  }
+}
+
+function isAnyModalDialogOpen() {
+  return Boolean(document.querySelector("dialog[open]"));
+}
+
+function announceScreenReaderNotification(text) {
+  if (!notifSrAnnouncer || !text) {
+    return;
+  }
+  // Do not add live-region updates while a modal dialog is open / background is inert
+  if (isAnyModalDialogOpen()) {
+    return;
+  }
+  notifSrAnnouncer.textContent = "";
+  window.requestAnimationFrame(() => {
+    if (!isAnyModalDialogOpen()) {
+      notifSrAnnouncer.textContent = text;
+    }
+  });
+}
+
+function showPersistentToast(ev) {
+  if (!notifToastRegion || !ev) {
+    return;
+  }
+  // Modern Web Guidance (persistent-toast-notifications):
+  // DON'T surface toast notifications in the background while a modal dialog is open.
+  if (isAnyModalDialogOpen()) {
+    return;
+  }
+
+  const severity =
+    ev.event_kind === "recovery" ? "resolved" : ev.severity || "error";
+  const toastEl = document.createElement("div");
+  toastEl.className = "notif-toast notif-toast-item";
+  toastEl.setAttribute("popover", "manual");
+  toastEl.dataset.severity = severity;
+  toastEl.dataset.kind = ev.event_kind || "";
+  toastEl.dataset.seq = String(ev.seq || 0);
+  toastEl.dataset.incidentId = ev.incident_id || "";
+  toastEl.dataset.eventKind = ev.event_kind || "";
+
+  const headerDiv = document.createElement("div");
+  headerDiv.className = "notif-toast-header";
+
+  const titleStrong = document.createElement("strong");
+  titleStrong.className = "notif-toast-title";
+  const kindPrefix =
+    ev.event_kind === "recovery"
+      ? "RESOLVED"
+      : ev.event_kind === "count_update"
+      ? `AGGREGATED (x${ev.count})`
+      : "OPEN";
+  titleStrong.textContent = `[${kindPrefix}] ${ev.event_type} · ${ev.route_id}`;
+  headerDiv.appendChild(titleStrong);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "btn btn-secondary btn-sm notif-toast-close";
+  closeBtn.setAttribute("aria-label", "Dismiss notification");
+  closeBtn.textContent = "Dismiss";
+
+  const removeToast = () => {
+    try {
+      if (typeof toastEl.hidePopover === "function") {
+        toastEl.hidePopover();
+      }
+    } catch (_err) {
+      // Ignore if already hidden
+    }
+    toastEl.classList.remove(":popover-open");
+    toastEl.remove();
+  };
+  closeBtn.addEventListener("click", removeToast);
+  headerDiv.appendChild(closeBtn);
+  toastEl.appendChild(headerDiv);
+
+  const bodyP = document.createElement("p");
+  bodyP.className = "notif-toast-body";
+  bodyP.textContent = `${ev.normalized_reason || "-"} — count=${ev.count || 1}, last_seen=${ev.last_seen || ev.occurred_at || "-"}`;
+  toastEl.appendChild(bodyP);
+
+  // Keep at most 3 toasts on screen
+  while (notifToastRegion.children.length >= 3) {
+    notifToastRegion.firstElementChild.remove();
+  }
+  notifToastRegion.appendChild(toastEl);
+
+  try {
+    if (typeof toastEl.showPopover === "function") {
+      toastEl.showPopover();
+    } else {
+      toastEl.classList.add(":popover-open");
+    }
+  } catch (_err) {
+    toastEl.classList.add(":popover-open");
+  }
+
+  window.setTimeout(removeToast, 7000);
+}
+
+function maybeTriggerBrowserNotification(ev) {
+  if (!ev || !ev.browser_notify) {
+    return false;
+  }
+  const seq = Number(ev.seq || 0);
+  if (seq > 0 && appState.notifBrowserNotifiedSeqs.has(seq)) {
+    return false;
+  }
+  if (seq > 0) {
+    appState.notifBrowserNotifiedSeqs.add(seq);
+  }
+
+  const perm = getBrowserNotificationPermission();
+  if (!appState.browserNotifEnabled || perm !== "granted") {
+    return false;
+  }
+
+  // Strictly sanitized notification payload (Rule 8):
+  // Only event_type, route_id, count, first/last seen (or resolved_at), and short normalized_reason.
+  // Never include request/response body or header values.
+  const titlePrefix =
+    ev.event_kind === "recovery"
+      ? "RESOLVED"
+      : ev.event_kind === "count_update"
+      ? `MILESTONE x${ev.count}`
+      : "INCIDENT";
+  const title = `[ProxyConsole ${titlePrefix}] ${ev.event_type} on ${ev.route_id}`;
+  const timeInfo =
+    ev.event_kind === "recovery" && ev.resolved_at
+      ? `first=${ev.first_seen}, resolved=${ev.resolved_at}`
+      : `first=${ev.first_seen}, last=${ev.last_seen}`;
+  const body = `route=${ev.route_id} | type=${ev.event_type} | count=${ev.count} | reason=${ev.normalized_reason} | ${timeInfo}`;
+  const payloadData = {
+    incident_id: ev.incident_id,
+    event_id: ev.event_id,
+    seq: seq,
+    event_type: ev.event_type,
+    event_kind: ev.event_kind,
+    route_id: ev.route_id,
+    count: Number(ev.count || 1),
+    first_seen: ev.first_seen || "",
+    last_seen: ev.last_seen || "",
+    resolved_at: ev.resolved_at || null,
+    normalized_reason: ev.normalized_reason || "",
+  };
+
+  try {
+    const n = new window.Notification(title, {
+      body,
+      tag: `proxyconsole-${ev.incident_id}-${ev.event_kind}-${ev.count}`,
+      data: payloadData,
+    });
+    if (n && typeof n.close === "function") {
+      window.setTimeout(() => {
+        try {
+          n.close();
+        } catch (_e) {
+          // ignore
+        }
+      }, 6000);
+    }
+    appState.browserNotifSentCount += 1;
+    appState.browserNotifHistory.push({
+      title,
+      body,
+      data: payloadData,
+      sent_at: new Date().toISOString(),
+    });
+    syncBrowserNotificationUI();
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+function renderNotificationsStatus() {
+  const incidents = appState.incidents || [];
+  const openIncidents = incidents.filter((inc) => inc.status === "open");
+  const unackOpen = openIncidents.filter((inc) => !inc.acknowledged);
+  const resolvedIncidents = incidents.filter((inc) => inc.status === "resolved");
+
+  const statusObj = appState.notifStatus || {};
+  const openCount =
+    typeof statusObj.open_incidents === "number"
+      ? statusObj.open_incidents
+      : openIncidents.length;
+  const unackCount =
+    typeof statusObj.unacknowledged_open_incidents === "number"
+      ? statusObj.unacknowledged_open_incidents
+      : unackOpen.length;
+  const resolvedCount =
+    typeof statusObj.resolved_incidents === "number"
+      ? statusObj.resolved_incidents
+      : resolvedIncidents.length;
+  const winSec = statusObj.config?.window_sec || 300;
+  const ignore4xx = statusObj.config?.ignore_4xx !== false;
+
+  if (notifOpenBadge) {
+    notifOpenBadge.textContent = String(openCount);
+    notifOpenBadge.className = `badge ${
+      openCount > 0 ? "badge-danger" : "badge-neutral"
+    }`;
+  }
+  if (notifOpenCountBadge) {
+    notifOpenCountBadge.textContent = `Open: ${openCount}`;
+    notifOpenCountBadge.dataset.openCount = String(openCount);
+    notifOpenCountBadge.className = `badge ${
+      openCount > 0 ? "badge-warning" : "badge-neutral"
+    }`;
+  }
+  if (notifUnackCountBadge) {
+    notifUnackCountBadge.textContent = `Unack Open: ${unackCount}`;
+    notifUnackCountBadge.dataset.unackCount = String(unackCount);
+    notifUnackCountBadge.className = `badge ${
+      unackCount > 0 ? "badge-danger" : "badge-neutral"
+    }`;
+  }
+  if (notifResolvedCountBadge) {
+    notifResolvedCountBadge.textContent = `Resolved: ${resolvedCount}`;
+    notifResolvedCountBadge.dataset.resolvedCount = String(resolvedCount);
+  }
+  if (notifWindowBadge) {
+    notifWindowBadge.textContent = `Window: ${winSec}s (${
+      ignore4xx ? "4xx Excluded" : "4xx Included"
+    })`;
+  }
+  if (notifWsSeqBadge) {
+    notifWsSeqBadge.dataset.latestSeq = String(appState.notifLatestSeq);
+    notifWsSeqBadge.textContent = `Cursor seq: ${appState.notifLatestSeq}`;
+  }
+
+  if (!appState.notificationsAvailable || appState.notificationsError) {
+    if (notificationsUnavailableBox) {
+      notificationsUnavailableBox.hidden = false;
+      notificationsUnavailableBox.dataset.errorCode =
+        appState.notificationsError?.code || "notifications_unavailable";
+    }
+    if (notificationsUnavailableTitle) {
+      notificationsUnavailableTitle.textContent = `Notifications Subsystem Degraded (${
+        appState.notificationsError?.code || "error"
+      })`;
+    }
+    if (notificationsUnavailableMessage) {
+      notificationsUnavailableMessage.textContent =
+        appState.notificationsError?.message ||
+        "Notifications endpoint or WebSocket feed could not be reached.";
+    }
+  } else if (notificationsUnavailableBox) {
+    notificationsUnavailableBox.hidden = true;
+    notificationsUnavailableBox.dataset.errorCode = "";
+  }
+}
+
+function buildNotificationsFilterQuery() {
+  const params = new URLSearchParams();
+  params.set("limit", "100");
+  if (notifFilterStatus && notifFilterStatus.value && notifFilterStatus.value !== "all") {
+    params.set("status", notifFilterStatus.value);
+  }
+  if (notifFilterType && notifFilterType.value && notifFilterType.value !== "all") {
+    params.set("event_type", notifFilterType.value);
+  }
+  if (notifFilterRoute && notifFilterRoute.value.trim()) {
+    params.set("route_id", notifFilterRoute.value.trim());
+  }
+  if (notifFilterFingerprint && notifFilterFingerprint.value.trim()) {
+    params.set("fingerprint", notifFilterFingerprint.value.trim());
+  }
+  if (notifFilterAck && notifFilterAck.value && notifFilterAck.value !== "all") {
+    params.set("acknowledged", notifFilterAck.value);
+  }
+  if (notifFilterSince && notifFilterSince.value.trim()) {
+    params.set("since", notifFilterSince.value.trim());
+  }
+  if (notifFilterUntil && notifFilterUntil.value.trim()) {
+    params.set("until", notifFilterUntil.value.trim());
+  }
+  if (notifFilterQ && notifFilterQ.value.trim()) {
+    params.set("q", notifFilterQ.value.trim());
+  }
+  return params.toString();
+}
+
+function renderIncidentsTable() {
+  if (!notifIncidentsTbody) {
+    return;
+  }
+  notifIncidentsTbody.textContent = "";
+  const items = appState.incidents || [];
+  if (notifShowingCount) {
+    notifShowingCount.textContent = `${items.length} incident${
+      items.length === 1 ? "" : "s"
+    }`;
+  }
+
+  if (items.length === 0) {
+    if (notifIncidentsEmpty) {
+      notifIncidentsEmpty.hidden = false;
+    }
+    return;
+  }
+  if (notifIncidentsEmpty) {
+    notifIncidentsEmpty.hidden = true;
+  }
+
+  for (const inc of items) {
+    const tr = document.createElement("tr");
+    tr.dataset.incidentId = inc.incident_id;
+    tr.dataset.status = inc.status;
+    tr.dataset.eventType = inc.event_type;
+    tr.dataset.routeId = inc.route_id;
+    tr.dataset.fingerprint = inc.fingerprint;
+    tr.dataset.count = String(inc.count || 1);
+    tr.dataset.acknowledged = String(Boolean(inc.acknowledged));
+    if (appState.selectedIncidentId === inc.incident_id) {
+      tr.dataset.selected = "true";
+    }
+
+    // 1. Status & Ack (th scope="row")
+    const thStatus = document.createElement("th");
+    thStatus.scope = "row";
+    const statusBadge = document.createElement("span");
+    statusBadge.dataset.status = inc.status;
+    statusBadge.className = `badge ${
+      inc.status === "open" ? "badge-danger" : "badge-success"
+    }`;
+    statusBadge.textContent = inc.status === "open" ? "OPEN" : "RESOLVED";
+    thStatus.appendChild(statusBadge);
+
+    const ackBadge = document.createElement("span");
+    ackBadge.dataset.acknowledged = String(Boolean(inc.acknowledged));
+    ackBadge.className = `badge ${
+      inc.acknowledged ? "badge-outline" : "badge-warning"
+    }`;
+    ackBadge.style.marginInlineStart = "0.35rem";
+    ackBadge.textContent = inc.acknowledged ? "Acked" : "Unacked";
+    thStatus.appendChild(ackBadge);
+
+    const idMeta = document.createElement("span");
+    idMeta.className = "cell-meta";
+    idMeta.textContent = `${inc.incident_id} (cycle #${inc.cycle_number || 1})`;
+    thStatus.appendChild(idMeta);
+    tr.appendChild(thStatus);
+
+    // 2. Severity / Event Type
+    const tdType = document.createElement("td");
+    const sevBadge = document.createElement("span");
+    sevBadge.className = `badge ${
+      inc.severity === "error" ? "badge-danger" : "badge-warning"
+    }`;
+    sevBadge.textContent = inc.severity || "error";
+    tdType.appendChild(sevBadge);
+
+    const typeCode = document.createElement("code");
+    typeCode.style.marginInlineStart = "0.35rem";
+    typeCode.textContent = inc.event_type;
+    tdType.appendChild(typeCode);
+    tr.appendChild(tdType);
+
+    // 3. Route
+    const tdRoute = document.createElement("td");
+    const routeCode = document.createElement("code");
+    routeCode.textContent = inc.route_id;
+    tdRoute.appendChild(routeCode);
+    if (inc.domain && inc.domain !== inc.route_id) {
+      const domMeta = document.createElement("span");
+      domMeta.className = "cell-meta";
+      domMeta.textContent = inc.domain;
+      tdRoute.appendChild(domMeta);
+    }
+    tr.appendChild(tdRoute);
+
+    // 4. Count
+    const tdCount = document.createElement("td");
+    tdCount.className = "num-col";
+    const countStrong = document.createElement("strong");
+    countStrong.dataset.incidentCount = String(inc.count || 1);
+    countStrong.textContent = String(inc.count || 1);
+    tdCount.appendChild(countStrong);
+    if (inc.suppressed_count > 0) {
+      const supMeta = document.createElement("span");
+      supMeta.className = "cell-meta";
+      supMeta.textContent = `${inc.suppressed_count} suppressed`;
+      tdCount.appendChild(supMeta);
+    }
+    tr.appendChild(tdCount);
+
+    // 5. Timestamps
+    const tdTime = document.createElement("td");
+    const lastSpan = document.createElement("div");
+    lastSpan.textContent = `Last: ${inc.last_seen || "-"}`;
+    tdTime.appendChild(lastSpan);
+    const firstMeta = document.createElement("span");
+    firstMeta.className = "cell-meta";
+    firstMeta.textContent = `First: ${inc.first_seen || "-"}`;
+    tdTime.appendChild(firstMeta);
+    if (inc.resolved_at) {
+      const resMeta = document.createElement("span");
+      resMeta.className = "cell-meta";
+      resMeta.textContent = `Resolved: ${inc.resolved_at}`;
+      tdTime.appendChild(resMeta);
+    }
+    tr.appendChild(tdTime);
+
+    // 6. Reason & Fingerprint
+    const tdReason = document.createElement("td");
+    const reasonCode = document.createElement("code");
+    reasonCode.textContent = inc.normalized_reason || "-";
+    tdReason.appendChild(reasonCode);
+    const fpMeta = document.createElement("span");
+    fpMeta.className = "cell-meta";
+    fpMeta.textContent = inc.fingerprint || "-";
+    tdReason.appendChild(fpMeta);
+    tr.appendChild(tdReason);
+
+    // 7. Actions
+    const tdActions = document.createElement("td");
+    const actWrap = document.createElement("div");
+    actWrap.className = "row-actions";
+
+    const inspectBtn = document.createElement("button");
+    inspectBtn.type = "button";
+    inspectBtn.className = "btn btn-sm btn-secondary btn-inspect-incident";
+    inspectBtn.dataset.incidentId = inc.incident_id;
+    inspectBtn.textContent = "Inspect";
+    inspectBtn.addEventListener("click", () =>
+      loadIncidentDetail(inc.incident_id)
+    );
+    actWrap.appendChild(inspectBtn);
+
+    const ackBtn = document.createElement("button");
+    ackBtn.type = "button";
+    ackBtn.className = "btn btn-sm btn-secondary btn-ack-incident";
+    ackBtn.dataset.incidentId = inc.incident_id;
+    ackBtn.textContent = inc.acknowledged ? "Unack" : "Ack";
+    ackBtn.addEventListener("click", () =>
+      acknowledgeIncidentById(inc.incident_id, !inc.acknowledged)
+    );
+    actWrap.appendChild(ackBtn);
+
+    if (inc.status === "open") {
+      const resolveBtn = document.createElement("button");
+      resolveBtn.type = "button";
+      resolveBtn.className = "btn btn-sm btn-primary btn-resolve-incident";
+      resolveBtn.dataset.incidentId = inc.incident_id;
+      resolveBtn.textContent = "Resolve";
+      resolveBtn.addEventListener("click", () =>
+        resolveIncidentById(inc.incident_id)
+      );
+      actWrap.appendChild(resolveBtn);
+    }
+
+    tdActions.appendChild(actWrap);
+    tr.appendChild(tdActions);
+    notifIncidentsTbody.appendChild(tr);
+  }
+}
+
+function renderIncidentDetail() {
+  const inc = appState.selectedIncident;
+  if (!inc) {
+    if (notifDetailEmpty) {
+      notifDetailEmpty.hidden = false;
+    }
+    if (notifDetailContent) {
+      notifDetailContent.hidden = true;
+    }
+    if (notifDetailStatusBadge) {
+      notifDetailStatusBadge.className = "badge badge-neutral";
+      notifDetailStatusBadge.textContent = "None Selected";
+    }
+    return;
+  }
+
+  if (notifDetailEmpty) {
+    notifDetailEmpty.hidden = true;
+  }
+  if (notifDetailContent) {
+    notifDetailContent.hidden = false;
+  }
+
+  if (notifDetailStatusBadge) {
+    notifDetailStatusBadge.className = `badge ${
+      inc.status === "open" ? "badge-danger" : "badge-success"
+    }`;
+    notifDetailStatusBadge.textContent =
+      inc.status === "open" ? "OPEN" : "RESOLVED";
+  }
+
+  notifDetailId.textContent = inc.incident_id || "-";
+  notifDetailFingerprint.textContent = inc.fingerprint || "-";
+  notifDetailStatus.textContent = inc.status || "-";
+  notifDetailSeverity.textContent = inc.severity || "-";
+  notifDetailType.textContent = inc.event_type || "-";
+  notifDetailRoute.textContent = inc.route_id || "-";
+  notifDetailDomain.textContent = inc.domain || "-";
+  notifDetailCount.textContent = String(inc.count || 1);
+  notifDetailSuppressed.textContent = String(inc.suppressed_count || 0);
+  notifDetailCycle.textContent = String(inc.cycle_number || 1);
+  notifDetailWindow.textContent = String(inc.window_sec || 300);
+  notifDetailReason.textContent = inc.normalized_reason || "-";
+  notifDetailMessage.textContent = inc.summary_message || "-";
+  notifDetailFirstSeen.textContent = inc.first_seen || "-";
+  notifDetailLastSeen.textContent = inc.last_seen || "-";
+  notifDetailResolvedAt.textContent = inc.resolved_at || "(still open)";
+  notifDetailRecoveryReason.textContent = inc.recovery_reason || "(none)";
+  notifDetailAckState.textContent = inc.acknowledged
+    ? `Acknowledged (${inc.acknowledged_at || "yes"})`
+    : "Unacknowledged";
+  notifDetailLastSeq.textContent = String(inc.last_seq || 0);
+
+  if (notifDetailAckBtn) {
+    notifDetailAckBtn.textContent = inc.acknowledged
+      ? "Unacknowledge"
+      : "Acknowledge";
+    notifDetailAckBtn.dataset.incidentId = inc.incident_id;
+  }
+  if (notifDetailResolveBtn) {
+    notifDetailResolveBtn.disabled = inc.status !== "open";
+    notifDetailResolveBtn.dataset.incidentId = inc.incident_id;
+  }
+  if (notifDetailFilterFpBtn) {
+    notifDetailFilterFpBtn.dataset.fingerprint = inc.fingerprint || "";
+  }
+
+  if (notifDetailEventsTbody) {
+    notifDetailEventsTbody.textContent = "";
+    const evList = appState.selectedIncidentEvents || [];
+    if (evList.length === 0) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 6;
+      td.textContent = "(no events recorded)";
+      tr.appendChild(td);
+      notifDetailEventsTbody.appendChild(tr);
+    } else {
+      for (const ev of evList) {
+        const tr = document.createElement("tr");
+        tr.dataset.seq = String(ev.seq || 0);
+        tr.dataset.eventKind = ev.event_kind || "";
+
+        const tdSeq = document.createElement("td");
+        tdSeq.className = "num-col";
+        const seqCode = document.createElement("code");
+        seqCode.textContent = String(ev.seq || 0);
+        tdSeq.appendChild(seqCode);
+        tr.appendChild(tdSeq);
+
+        const tdKind = document.createElement("td");
+        const kBadge = document.createElement("span");
+        kBadge.className = `badge ${
+          ev.event_kind === "recovery"
+            ? "badge-success"
+            : ev.event_kind === "initial"
+            ? "badge-danger"
+            : "badge-outline"
+        }`;
+        kBadge.textContent = ev.event_kind || "-";
+        tdKind.appendChild(kBadge);
+        tr.appendChild(tdKind);
+
+        const tdCnt = document.createElement("td");
+        tdCnt.className = "num-col";
+        tdCnt.textContent = String(ev.count || 1);
+        tr.appendChild(tdCnt);
+
+        const tdNotify = document.createElement("td");
+        const nBadge = document.createElement("span");
+        nBadge.className = `badge ${
+          ev.browser_notify ? "badge-warning" : "badge-neutral"
+        }`;
+        nBadge.textContent = ev.browser_notify ? "Notify" : "Suppressed";
+        tdNotify.appendChild(nBadge);
+        tr.appendChild(tdNotify);
+
+        const tdAt = document.createElement("td");
+        const atCode = document.createElement("code");
+        atCode.textContent = ev.occurred_at || "-";
+        tdAt.appendChild(atCode);
+        tr.appendChild(tdAt);
+
+        const tdMsg = document.createElement("td");
+        tdMsg.textContent = ev.message || ev.normalized_reason || "-";
+        tr.appendChild(tdMsg);
+
+        notifDetailEventsTbody.appendChild(tr);
+      }
+    }
+  }
+}
+
+function renderLiveEventStream() {
+  if (!notifLiveStreamTbody) {
+    return;
+  }
+  notifLiveStreamTbody.textContent = "";
+  const events = appState.liveStreamEvents || [];
+  if (notifStreamCountBadge) {
+    notifStreamCountBadge.textContent = `${events.length} event${
+      events.length === 1 ? "" : "s"
+    }`;
+  }
+
+  if (events.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 7;
+    td.textContent = "Waiting for live notification events...";
+    tr.appendChild(td);
+    notifLiveStreamTbody.appendChild(tr);
+    return;
+  }
+
+  for (const ev of events.slice(0, 40)) {
+    const tr = document.createElement("tr");
+    tr.dataset.seq = String(ev.seq || 0);
+    tr.dataset.incidentId = ev.incident_id || "";
+    tr.dataset.eventKind = ev.event_kind || "";
+
+    const tdSeq = document.createElement("td");
+    tdSeq.className = "num-col";
+    const seqCode = document.createElement("code");
+    seqCode.textContent = String(ev.seq || 0);
+    tdSeq.appendChild(seqCode);
+    tr.appendChild(tdSeq);
+
+    const tdKind = document.createElement("td");
+    const kBadge = document.createElement("span");
+    kBadge.className = `badge ${
+      ev.event_kind === "recovery"
+        ? "badge-success"
+        : ev.event_kind === "initial"
+        ? "badge-danger"
+        : "badge-outline"
+    }`;
+    kBadge.textContent = ev.event_kind || "-";
+    tdKind.appendChild(kBadge);
+    tr.appendChild(tdKind);
+
+    const tdType = document.createElement("td");
+    const tCode = document.createElement("code");
+    tCode.textContent = ev.event_type || "-";
+    tdType.appendChild(tCode);
+    tr.appendChild(tdType);
+
+    const tdRoute = document.createElement("td");
+    const rCode = document.createElement("code");
+    rCode.textContent = ev.route_id || "-";
+    tdRoute.appendChild(rCode);
+    tr.appendChild(tdRoute);
+
+    const tdCount = document.createElement("td");
+    tdCount.className = "num-col";
+    tdCount.textContent = String(ev.count || 1);
+    tr.appendChild(tdCount);
+
+    const tdReason = document.createElement("td");
+    const rsnCode = document.createElement("code");
+    rsnCode.textContent = ev.normalized_reason || "-";
+    tdReason.appendChild(rsnCode);
+    tr.appendChild(tdReason);
+
+    const tdAt = document.createElement("td");
+    tdAt.textContent = ev.occurred_at || "-";
+    tr.appendChild(tdAt);
+
+    notifLiveStreamTbody.appendChild(tr);
+  }
+}
+
+function doesIncidentMatchActiveFilters(inc) {
+  if (!inc) {
+    return false;
+  }
+  const st = notifFilterStatus?.value || "all";
+  if (st !== "all" && inc.status !== st) {
+    return false;
+  }
+  const tp = notifFilterType?.value || "all";
+  if (tp !== "all" && inc.event_type !== tp) {
+    return false;
+  }
+  const rt = (notifFilterRoute?.value || "").trim().toLowerCase();
+  if (
+    rt &&
+    !(inc.route_id || "").toLowerCase().includes(rt) &&
+    !(inc.domain || "").toLowerCase().includes(rt)
+  ) {
+    return false;
+  }
+  const fp = (notifFilterFingerprint?.value || "").trim().toLowerCase();
+  if (fp && (inc.fingerprint || "").toLowerCase() !== fp) {
+    return false;
+  }
+  const ack = notifFilterAck?.value || "all";
+  if (ack === "true" && !inc.acknowledged) {
+    return false;
+  }
+  if (ack === "false" && inc.acknowledged) {
+    return false;
+  }
+  const q = (notifFilterQ?.value || "").trim().toLowerCase();
+  if (q) {
+    const hay = `${inc.incident_id} ${inc.route_id} ${inc.domain} ${inc.event_type} ${inc.normalized_reason} ${inc.summary_message}`.toLowerCase();
+    if (!hay.includes(q)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function handleIncomingNotificationEvent(ev, { isLive = true } = {}) {
+  if (!ev || typeof ev !== "object") {
+    return false;
+  }
+  const seq = Number(ev.seq || 0);
+  if (seq > 0) {
+    // Deduplicate by monotonic cursor sequence (AC-10, Rule 6):
+    // Re-delivery of an already-processed seq must NEVER double-count or re-notify.
+    if (appState.notifProcessedSeqs.has(seq)) {
+      return false;
+    }
+    appState.notifProcessedSeqs.add(seq);
+    if (seq > appState.notifLatestSeq) {
+      appState.notifLatestSeq = seq;
+    }
+  }
+
+  // Upsert into liveStreamEvents
+  if (seq > 0 && !appState.liveStreamEvents.some((x) => Number(x.seq) === seq)) {
+    appState.liveStreamEvents.unshift(ev);
+    appState.liveStreamEvents.sort((a, b) => Number(b.seq || 0) - Number(a.seq || 0));
+    if (appState.liveStreamEvents.length > 100) {
+      appState.liveStreamEvents.length = 100;
+    }
+  }
+
+  // Upsert incident snapshot in appState.incidents
+  if (ev.incident_id) {
+    const existingIdx = appState.incidents.findIndex(
+      (item) => item.incident_id === ev.incident_id
+    );
+    const prevInc = existingIdx >= 0 ? appState.incidents[existingIdx] : {};
+    const updatedInc = {
+      ...prevInc,
+      incident_id: ev.incident_id,
+      fingerprint: ev.fingerprint || prevInc.fingerprint || "",
+      route_id: ev.route_id || prevInc.route_id || "unmatched",
+      domain: ev.domain ?? prevInc.domain ?? "",
+      event_type: ev.event_type || prevInc.event_type || "",
+      severity: ev.severity || prevInc.severity || "error",
+      status: ev.status || prevInc.status || "open",
+      normalized_reason:
+        ev.normalized_reason || prevInc.normalized_reason || "",
+      summary_message:
+        ev.summary_message || ev.message || prevInc.summary_message || "",
+      count: Number(ev.count ?? prevInc.count ?? 1),
+      suppressed_count: Number(
+        ev.suppressed_count ?? prevInc.suppressed_count ?? 0
+      ),
+      window_sec: Number(ev.window_sec ?? prevInc.window_sec ?? 300),
+      cycle_number: Number(ev.cycle_number ?? prevInc.cycle_number ?? 1),
+      first_seen: ev.first_seen || prevInc.first_seen || ev.occurred_at || "",
+      first_seen_epoch: Number(
+        ev.first_seen_epoch ?? prevInc.first_seen_epoch ?? 0
+      ),
+      last_seen: ev.last_seen || prevInc.last_seen || ev.occurred_at || "",
+      last_seen_epoch: Number(
+        ev.last_seen_epoch ?? prevInc.last_seen_epoch ?? 0
+      ),
+      resolved_at:
+        ev.status === "resolved"
+          ? ev.resolved_at || prevInc.resolved_at || ev.occurred_at
+          : null,
+      recovery_reason:
+        ev.status === "resolved"
+          ? ev.recovery_reason || prevInc.recovery_reason || ""
+          : null,
+      acknowledged: Boolean(ev.acknowledged ?? prevInc.acknowledged ?? false),
+      acknowledged_at: ev.acknowledged_at ?? prevInc.acknowledged_at ?? null,
+      last_seq: Math.max(seq, Number(prevInc.last_seq || 0)),
+    };
+
+    if (existingIdx >= 0) {
+      if (doesIncidentMatchActiveFilters(updatedInc)) {
+        appState.incidents[existingIdx] = updatedInc;
+      } else {
+        appState.incidents.splice(existingIdx, 1);
+      }
+    } else if (doesIncidentMatchActiveFilters(updatedInc)) {
+      appState.incidents.unshift(updatedInc);
+    }
+
+    // Sort open incidents first, then by last_seen_epoch descending
+    appState.incidents.sort((a, b) => {
+      const aOpen = a.status === "open" ? 0 : 1;
+      const bOpen = b.status === "open" ? 0 : 1;
+      if (aOpen !== bOpen) {
+        return aOpen - bOpen;
+      }
+      return Number(b.last_seen_epoch || 0) - Number(a.last_seen_epoch || 0);
+    });
+
+    if (appState.selectedIncidentId === ev.incident_id) {
+      appState.selectedIncident = updatedInc;
+      if (
+        seq > 0 &&
+        !appState.selectedIncidentEvents.some((x) => Number(x.seq) === seq)
+      ) {
+        appState.selectedIncidentEvents.unshift(ev);
+        appState.selectedIncidentEvents.sort(
+          (a, b) => Number(b.seq || 0) - Number(a.seq || 0)
+        );
+      }
+      renderIncidentDetail();
+    }
+  }
+
+  // Recompute status counters from current incidents if notifStatus exists
+  if (appState.notifStatus) {
+    delete appState.notifStatus.open_incidents;
+    delete appState.notifStatus.unacknowledged_open_incidents;
+    delete appState.notifStatus.resolved_incidents;
+  }
+  renderNotificationsStatus();
+  renderIncidentsTable();
+  renderLiveEventStream();
+
+  // Trigger live alerts only for events occurring after initial page load
+  const initialFloor =
+    appState.notifInitialLoadSeq !== null ? appState.notifInitialLoadSeq : 0;
+  if (isLive && seq > initialFloor && ev.browser_notify) {
+    showPersistentToast(ev);
+    announceScreenReaderNotification(
+      `${ev.event_kind === "recovery" ? "Resolved" : "Alert"}: ${ev.event_type} on ${ev.route_id}, count ${ev.count}, reason ${ev.normalized_reason}`
+    );
+    maybeTriggerBrowserNotification(ev);
+  }
+  return true;
+}
+
+async function resyncNotificationsViaRest({ triggerLiveAlerts = true } = {}) {
+  const sinceSeq = Number(appState.notifLatestSeq || 0);
+  try {
+    const evData = await apiRequest(
+      `/api/v1/notifications/events?since_seq=${sinceSeq}&limit=200`
+    );
+    const items = evData.items || [];
+    for (const ev of items) {
+      handleIncomingNotificationEvent(ev, { isLive: triggerLiveAlerts });
+    }
+    if (typeof evData.latest_seq === "number" && evData.latest_seq > appState.notifLatestSeq) {
+      appState.notifLatestSeq = evData.latest_seq;
+    }
+    renderNotificationsStatus();
+  } catch (_err) {
+    // Non-fatal during background resync
+  }
+}
+
+function connectNotificationsWebSocket({ forceReconnect = false } = {}) {
+  if (appState.wsReconnectTimer) {
+    window.clearTimeout(appState.wsReconnectTimer);
+    appState.wsReconnectTimer = null;
+  }
+  if (appState.wsSocket) {
+    if (
+      !forceReconnect &&
+      (appState.wsSocket.readyState === WebSocket.OPEN ||
+        appState.wsSocket.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+    try {
+      appState.wsSocket.onclose = null;
+      appState.wsSocket.onerror = null;
+      appState.wsSocket.onmessage = null;
+      appState.wsSocket.close();
+    } catch (_err) {
+      // ignore
+    }
+    appState.wsSocket = null;
+  }
+
+  const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const sinceSeq = Number(appState.notifLatestSeq || 0);
+  const wsUrl = `${wsProto}//${window.location.host}/api/v1/notifications/ws?since_seq=${sinceSeq}`;
+  setWsFeedState(appState.wsReconnectAttempts > 0 ? "reconnecting" : "connecting");
+
+  let sock;
+  try {
+    sock = new WebSocket(wsUrl);
+  } catch (err) {
+    setWsFeedState("error", err.message || "socket_init_failed");
+    scheduleWsReconnect();
+    return;
+  }
+  appState.wsSocket = sock;
+
+  sock.onopen = () => {
+    appState.wsReconnectAttempts = 0;
+    appState.notificationsAvailable = true;
+    appState.notificationsError = null;
+    setWsFeedState("connected");
+    renderNotificationsStatus();
+    // Perform cursor resync over REST as well to guarantee zero missed events
+    resyncNotificationsViaRest({ triggerLiveAlerts: true });
+  };
+
+  sock.onmessage = (msgEv) => {
+    let payload = null;
+    try {
+      payload = JSON.parse(msgEv.data);
+    } catch (_err) {
+      return;
+    }
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+    if (payload.type === "hello") {
+      const srvSeq = Number(payload.latest_seq || 0);
+      if (appState.notifInitialLoadSeq === null) {
+        appState.notifInitialLoadSeq = srvSeq;
+      }
+      setWsFeedState("connected");
+      return;
+    }
+    if (payload.type === "sync" || payload.type === "resync_events") {
+      const srvSeq = Number(payload.latest_seq || 0);
+      if (appState.notifInitialLoadSeq === null) {
+        appState.notifInitialLoadSeq = srvSeq;
+      }
+      const items = Array.isArray(payload.events)
+        ? payload.events
+        : Array.isArray(payload.items)
+        ? payload.items
+        : [];
+      for (const ev of items) {
+        handleIncomingNotificationEvent(ev, { isLive: true });
+      }
+      setWsFeedState("connected");
+      return;
+    }
+    if (payload.type === "notification_event" && payload.event) {
+      handleIncomingNotificationEvent(payload.event, { isLive: true });
+      setWsFeedState("connected");
+    }
+  };
+
+  sock.onerror = () => {
+    setWsFeedState("error");
+  };
+
+  sock.onclose = () => {
+    if (appState.wsSocket === sock) {
+      appState.wsSocket = null;
+      setWsFeedState("disconnected");
+      scheduleWsReconnect();
+    }
+  };
+}
+
+function scheduleWsReconnect() {
+  if (appState.wsReconnectTimer) {
+    return;
+  }
+  appState.wsReconnectAttempts += 1;
+  const delayMs = Math.min(3000, 400 * appState.wsReconnectAttempts);
+  appState.wsReconnectTimer = window.setTimeout(() => {
+    appState.wsReconnectTimer = null;
+    connectNotificationsWebSocket({ forceReconnect: true });
+  }, delayMs);
+}
+
+async function loadNotificationsState({ preserveBanner = true } = {}) {
+  beginOp();
+  try {
+    const qs = buildNotificationsFilterQuery();
+    const [statusData, incidentsData, eventsData] = await Promise.all([
+      apiRequest("/api/v1/notifications/status"),
+      apiRequest(`/api/v1/notifications/incidents?${qs}`),
+      apiRequest("/api/v1/notifications/events?limit=40"),
+    ]);
+
+    appState.notificationsAvailable = true;
+    appState.notificationsError = null;
+    appState.notifStatus = statusData;
+    appState.incidents = incidentsData.items || [];
+    appState.incidentsTotal = Number(incidentsData.total || 0);
+
+    const srvLatestSeq = Number(
+      statusData.latest_seq ?? eventsData.latest_seq ?? 0
+    );
+    if (appState.notifInitialLoadSeq === null) {
+      appState.notifInitialLoadSeq = srvLatestSeq;
+    }
+    if (srvLatestSeq > appState.notifLatestSeq) {
+      appState.notifLatestSeq = srvLatestSeq;
+    }
+
+    const evItems = Array.isArray(eventsData.items) ? eventsData.items : [];
+    for (const ev of evItems) {
+      const s = Number(ev.seq || 0);
+      if (s > 0) {
+        appState.notifProcessedSeqs.add(s);
+      }
+    }
+    // Merge events into liveStreamEvents sorted descending by seq
+    const mergedBySeq = new Map();
+    for (const ev of [...appState.liveStreamEvents, ...evItems]) {
+      const s = Number(ev.seq || 0);
+      if (s > 0 && !mergedBySeq.has(s)) {
+        mergedBySeq.set(s, ev);
+      }
+    }
+    appState.liveStreamEvents = Array.from(mergedBySeq.values()).sort(
+      (a, b) => Number(b.seq || 0) - Number(a.seq || 0)
+    );
+
+    syncBrowserNotificationUI();
+    renderNotificationsStatus();
+    renderIncidentsTable();
+    renderLiveEventStream();
+
+    if (appState.selectedIncidentId) {
+      const stillExists = appState.incidents.find(
+        (i) => i.incident_id === appState.selectedIncidentId
+      );
+      if (stillExists) {
+        await loadIncidentDetail(appState.selectedIncidentId, {
+          preserveBanner: true,
+        });
+      } else {
+        renderIncidentDetail();
+      }
+    }
+
+    // Ensure WebSocket live feed is connected
+    connectNotificationsWebSocket({ forceReconnect: false });
+
+    if (!preserveBanner) {
+      setFeedback(
+        "idle",
+        "Notifications Loaded",
+        `Loaded ${appState.incidents.length} incidents (cursor seq ${appState.notifLatestSeq}).`
+      );
+    }
+  } catch (err) {
+    // Fault isolation (Rule 9, AC-13):
+    // Notifications failure never breaks Routes, Docker, Requests, Replay, or Rules.
+    appState.notificationsAvailable = false;
+    appState.notificationsError = {
+      code: err.code || "notifications_unavailable",
+      message: err.message || "Notifications subsystem unavailable",
+    };
+    syncBrowserNotificationUI();
+    renderNotificationsStatus();
+    renderIncidentsTable();
+    renderLiveEventStream();
+    if (!preserveBanner) {
+      setFeedback(
+        "error",
+        `Notifications Degraded (${err.code || "error"})`,
+        err.message || "Notifications API unavailable.",
+        {
+          errorCode: err.code || "notifications_unavailable",
+          hint: "Proxy routing, capture, Rules, Routes, Docker, Requests, and Replay remain operational.",
+        }
+      );
+    }
+  } finally {
+    endOp();
+  }
+}
+
+async function loadIncidentDetail(
+  incidentId,
+  { preserveBanner = false } = {}
+) {
+  if (!incidentId) {
+    return;
+  }
+  beginOp();
+  try {
+    const data = await apiRequest(
+      `/api/v1/notifications/incidents/${encodeURIComponent(incidentId)}`
+    );
+    appState.selectedIncidentId = incidentId;
+    appState.selectedIncident = data.incident || null;
+    appState.selectedIncidentEvents = data.events || [];
+    renderIncidentsTable();
+    renderIncidentDetail();
+    if (!preserveBanner && appState.selectedIncident) {
+      setFeedback(
+        "idle",
+        `Incident ${incidentId}`,
+        `Viewing incident ${incidentId} (${appState.selectedIncident.event_type} on ${appState.selectedIncident.route_id}, count=${appState.selectedIncident.count}).`
+      );
+    }
+  } catch (err) {
+    setFeedback(
+      "error",
+      `Failed to Load Incident (${err.code || "error"})`,
+      err.message,
+      { errorCode: err.code }
+    );
+  } finally {
+    endOp();
+  }
+}
+
+async function acknowledgeIncidentById(incidentId, acknowledged = true) {
+  if (!incidentId) {
+    return;
+  }
+  beginOp();
+  try {
+    const res = await apiRequest(
+      `/api/v1/notifications/incidents/${encodeURIComponent(
+        incidentId
+      )}/acknowledge`,
+      {
+        method: "POST",
+        body: JSON.stringify({ acknowledged: Boolean(acknowledged) }),
+      }
+    );
+    const updated = res.incident;
+    if (updated) {
+      const idx = appState.incidents.findIndex(
+        (i) => i.incident_id === incidentId
+      );
+      if (idx >= 0) {
+        appState.incidents[idx] = updated;
+      }
+      if (appState.selectedIncidentId === incidentId) {
+        await loadIncidentDetail(incidentId, { preserveBanner: true });
+      }
+    }
+    await loadNotificationsState({ preserveBanner: true });
+    setFeedback(
+      "success",
+      acknowledged ? "Incident Acknowledged" : "Incident Unacknowledged",
+      `Incident ${incidentId} marked as ${
+        acknowledged ? "acknowledged" : "unacknowledged"
+      }.`
+    );
+  } catch (err) {
+    setFeedback(
+      "error",
+      `Acknowledge Failed (${err.code || "error"})`,
+      err.message,
+      { errorCode: err.code }
+    );
+  } finally {
+    endOp();
+  }
+}
+
+async function resolveIncidentById(
+  incidentId,
+  recoveryReason = "manual_console_resolve"
+) {
+  if (!incidentId) {
+    return;
+  }
+  beginOp();
+  try {
+    await apiRequest(
+      `/api/v1/notifications/incidents/${encodeURIComponent(
+        incidentId
+      )}/resolve`,
+      {
+        method: "POST",
+        body: JSON.stringify({ recovery_reason: recoveryReason }),
+      }
+    );
+    await loadNotificationsState({ preserveBanner: true });
+    if (appState.selectedIncidentId === incidentId) {
+      await loadIncidentDetail(incidentId, { preserveBanner: true });
+    }
+    setFeedback(
+      "success",
+      "Incident Resolved",
+      `Incident ${incidentId} transitioned to resolved.`
+    );
+  } catch (err) {
+    setFeedback(
+      "error",
+      `Resolve Failed (${err.code || "error"})`,
+      err.message,
+      { errorCode: err.code }
+    );
+  } finally {
+    endOp();
+  }
+}
+
+async function handleAcknowledgeAllOpen() {
+  beginOp();
+  try {
+    const routeFilter = notifFilterRoute?.value.trim() || null;
+    const res = await apiRequest("/api/v1/notifications/acknowledge-all", {
+      method: "POST",
+      body: JSON.stringify({ status: "open", route_id: routeFilter }),
+    });
+    await loadNotificationsState({ preserveBanner: true });
+    setFeedback(
+      "success",
+      "Acknowledged Open Incidents",
+      `Acknowledged ${res.acknowledged_count ?? 0} open incident(s).`
+    );
+  } catch (err) {
+    setFeedback(
+      "error",
+      `Acknowledge All Failed (${err.code || "error"})`,
+      err.message,
+      { errorCode: err.code }
+    );
+  } finally {
+    endOp();
+  }
+}
+
+if (enableBrowserNotifBtn) {
+  enableBrowserNotifBtn.addEventListener(
+    "click",
+    handleEnableBrowserNotificationsClick
+  );
+}
+
+if (notifWsReconnectBtn) {
+  notifWsReconnectBtn.addEventListener("click", async () => {
+    connectNotificationsWebSocket({ forceReconnect: true });
+    await resyncNotificationsViaRest({ triggerLiveAlerts: true });
+    await loadNotificationsState({ preserveBanner: false });
+  });
+}
+
+if (retryNotificationsBtn) {
+  retryNotificationsBtn.addEventListener("click", async () => {
+    connectNotificationsWebSocket({ forceReconnect: true });
+    await loadNotificationsState({ preserveBanner: false });
+  });
+}
+
+if (notifRefreshBtn) {
+  notifRefreshBtn.addEventListener("click", () => {
+    loadNotificationsState({ preserveBanner: false });
+  });
+}
+
+if (notifAckAllBtn) {
+  notifAckAllBtn.addEventListener("click", handleAcknowledgeAllOpen);
+}
+
+if (notifFilterForm) {
+  notifFilterForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    loadNotificationsState({ preserveBanner: false });
+  });
+}
+
+if (notifFilterResetBtn) {
+  notifFilterResetBtn.addEventListener("click", () => {
+    if (notifFilterStatus) notifFilterStatus.value = "all";
+    if (notifFilterType) notifFilterType.value = "all";
+    if (notifFilterRoute) notifFilterRoute.value = "";
+    if (notifFilterFingerprint) notifFilterFingerprint.value = "";
+    if (notifFilterAck) notifFilterAck.value = "all";
+    if (notifFilterSince) notifFilterSince.value = "";
+    if (notifFilterUntil) notifFilterUntil.value = "";
+    if (notifFilterQ) notifFilterQ.value = "";
+    loadNotificationsState({ preserveBanner: false });
+  });
+}
+
+if (notifDetailAckBtn) {
+  notifDetailAckBtn.addEventListener("click", () => {
+    const inc = appState.selectedIncident;
+    if (inc) {
+      acknowledgeIncidentById(inc.incident_id, !inc.acknowledged);
+    }
+  });
+}
+
+if (notifDetailResolveBtn) {
+  notifDetailResolveBtn.addEventListener("click", () => {
+    const inc = appState.selectedIncident;
+    if (inc && inc.status === "open") {
+      resolveIncidentById(inc.incident_id);
+    }
+  });
+}
+
+if (notifDetailFilterFpBtn) {
+  notifDetailFilterFpBtn.addEventListener("click", () => {
+    const fp = notifDetailFilterFpBtn.dataset.fingerprint || "";
+    if (fp && notifFilterFingerprint) {
+      notifFilterFingerprint.value = fp;
+      loadNotificationsState({ preserveBanner: false });
+    }
+  });
+}
+
+syncBrowserNotificationUI();
 
 // Initial load
 loadAllState({ refreshDiscovery: true });

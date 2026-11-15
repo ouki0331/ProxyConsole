@@ -1122,4 +1122,129 @@ textarea:focus-visible,
   font-size: 0.88rem;
 }
 
+/* ================================================================
+   DEV-042: Aggregated Notifications & Live Event Feed Styles
+   ================================================================ */
+.notif-controls-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  margin-block-start: 0.9rem;
+  padding-block-start: 0.85rem;
+  border-block-start: 1px solid var(--border-color);
+}
+
+.notif-ws-controls,
+.notif-browser-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.notif-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.notif-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 1180px) {
+  .notif-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.notif-right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+#notif-incidents-table {
+  --label-2: "Severity / Type";
+  --label-3: "Route";
+  --label-4: "Count";
+  --label-5: "Last / Resolved";
+  --label-6: "Reason & Fingerprint";
+  --label-7: "Actions";
+}
+
+#notif-incidents-tbody tr[data-selected="true"] {
+  background: #e8f0fe;
+}
+
+.num-col {
+  font-variant-numeric: tabular-nums;
+}
+
+.notif-toast-region {
+  position: fixed;
+  inset-block-end: 1rem;
+  inset-inline-end: 1rem;
+  z-index: 950;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-inline-size: min(420px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.notif-toast-item {
+  pointer-events: auto;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-inline-start: 4px solid var(--accent-primary);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.16);
+  margin: 0;
+  inset: auto;
+  position: relative;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition-behavior: allow-discrete;
+}
+
+.notif-toast-item[popover]:is(:popover-open, .\:popover-open) {
+  display: block;
+}
+
+.notif-toast-item[data-severity="error"],
+.notif-toast-item[data-severity="critical"] {
+  border-inline-start-color: #d93025;
+}
+
+.notif-toast-item[data-severity="warning"] {
+  border-inline-start-color: #e37400;
+}
+
+.notif-toast-item[data-kind="recovery"] {
+  border-inline-start-color: #188038;
+}
+
+.notif-toast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-block-end: 0.35rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notif-toast-item {
+    transition: none;
+  }
+}
+
+
 

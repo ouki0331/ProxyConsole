@@ -24,6 +24,7 @@ test:
 	./tests/integration/test_web_request_console.sh
 	./tests/integration/test_modification_rules.sh
 	./tests/integration/test_web_rules_console.sh
+	./tests/integration/test_notifications_console.sh
 
 clean:
 	./scripts/down.sh

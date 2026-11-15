@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+mkdir -p /var/lib/proxyconsole/router 2>/dev/null || true
+chmod 0777 /var/lib/proxyconsole/router 2>/dev/null || true
+touch /var/lib/proxyconsole/router/nginx-error.log 2>/dev/null || true
+chmod 0666 /var/lib/proxyconsole/router/nginx-error.log 2>/dev/null || true
+
 # If invoked for one-off validation (e.g. `nginx -t`), execute directly
 if [ "${1:-}" = "nginx" ] && [ "${2:-}" = "-t" ]; then
   exec "$@"

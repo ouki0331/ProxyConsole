@@ -1745,6 +1745,49 @@ def main() -> int:
     p_ru_preview.add_argument("--include-disabled", action="store_true")
     p_ru_preview.add_argument("--candidate-rule-json", default=None)
 
+    sub.add_parser("notification-status", help="Show notifications subsystem status")
+
+    p_no_list = sub.add_parser(
+        "notification-list", help="List and filter notification incidents"
+    )
+    p_no_list.add_argument("--status", default=None, help="open, resolved, or all")
+    p_no_list.add_argument("--event-type", default=None)
+    p_no_list.add_argument("--route", "--route-id", dest="route_id", default=None)
+    p_no_list.add_argument("--fingerprint", default=None)
+    p_no_list.add_argument("--acknowledged", default=None)
+    p_no_list.add_argument("--since", default=None)
+    p_no_list.add_argument("--until", default=None)
+    p_no_list.add_argument("--q", default=None)
+    p_no_list.add_argument("--limit", type=int, default=100)
+
+    p_no_get = sub.add_parser(
+        "notification-get", help="Get incident detail and event history"
+    )
+    p_no_get.add_argument("incident_id", help="Incident ID")
+
+    p_no_ack = sub.add_parser(
+        "notification-ack", help="Acknowledge or unacknowledge an incident"
+    )
+    p_no_ack.add_argument("incident_id", help="Incident ID")
+    p_no_ack.add_argument("--unack", action="store_true")
+
+    p_no_res = sub.add_parser(
+        "notification-resolve", help="Resolve an open incident"
+    )
+    p_no_res.add_argument("incident_id", help="Incident ID")
+    p_no_res.add_argument("--reason", default="manual_cli_resolve")
+
+    p_no_ev = sub.add_parser(
+        "notification-events", help="List live notification events by cursor/filter"
+    )
+    p_no_ev.add_argument("--since-seq", type=int, default=None)
+    p_no_ev.add_argument("--incident-id", default=None)
+    p_no_ev.add_argument("--status", default=None)
+    p_no_ev.add_argument("--event-type", default=None)
+    p_no_ev.add_argument("--route", "--route-id", dest="route_id", default=None)
+    p_no_ev.add_argument("--fingerprint", default=None)
+    p_no_ev.add_argument("--limit", type=int, default=200)
+
     args = parser.parse_args()
     if args.subcommand in ("list", "search"):
         return cmd_search(args)
@@ -1828,6 +1871,83 @@ def main() -> int:
         return cmd_rule_delete(args)
     if args.subcommand == "rule-preview":
         return cmd_rule_preview(args)
+    if args.subcommand == "notification-status":
+        store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+        print(json.dumps(store.notifications.get_status(), ensure_ascii=False, indent=2))
+        return 0
+    if args.subcommand == "notification-list":
+        store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+        ack_val = _parse_cli_bool(args.acknowledged)
+        print(
+            json.dumps(
+                store.notifications.list_incidents(
+                    status=args.status,
+                    event_type=args.event_type,
+                    route_id=args.route_id,
+                    fingerprint=args.fingerprint,
+                    acknowledged=ack_val,
+                    since=args.since,
+                    until=args.until,
+                    q=args.q,
+                    limit=args.limit,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.subcommand == "notification-get":
+        store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+        print(
+            json.dumps(
+                store.notifications.get_incident(args.incident_id),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.subcommand == "notification-ack":
+        store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+        print(
+            json.dumps(
+                store.notifications.acknowledge_incident(
+                    args.incident_id, acknowledged=not args.unack
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.subcommand == "notification-resolve":
+        store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+        print(
+            json.dumps(
+                store.notifications.resolve_incident(
+                    args.incident_id, recovery_reason=args.reason
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.subcommand == "notification-events":
+        store = CaptureIndexStore(storage_dir=args.storage_dir, db_path=args.db_path)
+        print(
+            json.dumps(
+                store.notifications.list_events(
+                    since_seq=args.since_seq,
+                    incident_id=args.incident_id,
+                    status=args.status,
+                    event_type=args.event_type,
+                    route_id=args.route_id,
+                    fingerprint=args.fingerprint,
+                    limit=args.limit,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     return 1
 
 

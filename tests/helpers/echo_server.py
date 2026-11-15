@@ -9,6 +9,7 @@ import signal
 import struct
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlsplit
 
@@ -213,7 +214,36 @@ class EchoRequestHandler(BaseHTTPRequestHandler):
             json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
         ).encode("utf-8")
 
-        self.send_response(200)
+        # Optional test simulation controls (only active when __pc_sleep_ms or __pc_status / X-Echo-* headers are supplied)
+        q_dict = dict(query_params)
+        sleep_raw = (
+            self.headers.get("X-Echo-Sleep-Ms")
+            or q_dict.get("__pc_sleep_ms")
+            or ""
+        ).strip()
+        if sleep_raw:
+            try:
+                sleep_sec = max(0.0, min(float(sleep_raw) / 1000.0, 15.0))
+                if sleep_sec > 0:
+                    time.sleep(sleep_sec)
+            except ValueError:
+                pass
+
+        status_raw = (
+            self.headers.get("X-Echo-Response-Status")
+            or q_dict.get("__pc_status")
+            or ""
+        ).strip()
+        resp_status = 200
+        if status_raw:
+            try:
+                cand_st = int(status_raw)
+                if 100 <= cand_st <= 599:
+                    resp_status = cand_st
+            except ValueError:
+                pass
+
+        self.send_response(resp_status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(response_bytes)))
         self.send_header("X-Echo-Target", TARGET_ID)
