@@ -1,29 +1,29 @@
 # ProxyConsole
 
-ProxyConsole 是一个面向单人 WSL/Docker 本地开发环境的聚合控制台。它统一接管 HTTP/HTTPS 入口、按域名路由到容器、保存与重放请求、管理修改规则和本地通知，并逐步聚合本机项目、数据库状态与容器日志。
+ProxyConsole は、単一利用者の WSL / Docker ローカル開発環境向けの統合コンソールです。HTTP / HTTPS の入口を統一的に受け持ち、ドメイン単位でコンテナへルーティングし、リクエストの保存と再送、変更ルールの適用、ローカル障害通知を管理します。さらにローカルプロジェクト、データベース状態、コンテナログを段階的に集約します。
 
-P1～P5 的本地代理、捕获、路由管理、重放、规则和通知功能已经实现并通过独立复审。产品保持 localhost 单人使用，不以公司共享、多用户或公开部署为目标。
+P1〜P5 のローカルプロキシ、キャプチャ、ルーティング管理、リクエスト再送、ルールエンジン、通知機能はすでに実装され、独立レビューに合格しています。本プロダクトは localhost 単一利用者での利用を前提としており、会社共有、マルチユーザー、またはパブリック環境への配備を対象としません。
 
-## 当前工作方式
+## 現在の運用方式
 
-- 只使用 `main` 分支。
-- 同一时间只允许一个执行者修改仓库。
-- 规划者负责拆任务、验收、记录审查意见和决定是否进入下一阶段。
-- 执行 Agent 只读取当前任务及其明确引用的文档，不需要读取历史对话。
-- Agent 之间的任务、状态、审查和交接使用日语。
-- 每次可审查的产物都必须提交并推送到远端 Git。
+- `main` ブランチのみを使用します。
+- 同一時間帯にリポジトリを変更できる実行者は1人のみです。
+- 計画者（Orchestrator）がタスクの分解、受入検証、レビュー意見の記録、および次フェーズへの移行判定を担当します。
+- 実装者（Implementer）は現在のタスクおよび明示的に参照されたドキュメントのみを読み込み、過去の対話履歴を読む必要はありません。
+- Agent 間のタスク定義、ステータス、レビュー、および引き継ぎには日本語を使用します。
+- レビュー対象となる成果物は必ずコミットし、リモート Git へプッシュします。
 
-## 文档入口
+## ドキュメント一覧
 
-- [开发总计划](docs/development/PLAN.md)
-- [顺序执行、轮询与审查协议](docs/development/WORKFLOW.md)
-- [当前状态](docs/development/STATUS.md)
-- [产品能力与范围](docs/product/PRODUCT_MAP.md)
-- [仓库目录规划](docs/architecture/REPOSITORY_LAYOUT.md)
-- [请求记录契约](docs/architecture/CAPTURE_CONTRACT.md)
-- [首个执行任务](docs/tasks/DEV-001.md)
-- [Git 自动交接协议](.agents/README.md)
+- [開発総計画](docs/development/PLAN.md)
+- [順次実行・ポーリング・レビュー規約](docs/development/WORKFLOW.md)
+- [現在のステータス](docs/development/STATUS.md)
+- [プロダクト機能マップとスコープ](docs/product/PRODUCT_MAP.md)
+- [リポジトリ構成計画](docs/architecture/REPOSITORY_LAYOUT.md)
+- [キャプチャ保存契約](docs/architecture/CAPTURE_CONTRACT.md)
+- [初期タスク定義](docs/tasks/DEV-001.md)
+- [Git メールボックス自動引き継ぎ規約](.agents/README.md)
 
-## 当前下一步
+## 現在の状況
 
-`DEV-060`：增加英语 / 日语界面、无表单的统计 Overview，以及既有 workspace 的快捷键切换。任务通过 Git mailbox 自动派发，不需要用户转发提示词。
+`DEV-060`（英語/日本語UI、フォームのない統計Overviewダッシュボード、既存ワークスペースのショートカット切替）の実装と検証が完了し、`Ready for review` 状態です。タスクは Git メールボックスを介して自動的にディスパッチされます。
