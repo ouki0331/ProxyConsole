@@ -1,22 +1,22 @@
 # ProxyConsole 開発計画
 
-更新日: 2026-11-15
+更新日: 2026-11-24
 計画状態: Active
 現在フェーズ: P7 — Personal local dashboard & observability
-実装状態: G5 passed / P6 deferred / DEV-060 in progress
+実装状態: G5 passed / P6 deferred / DEV-060 review remediation planned
 
 ## 1. バージョン目標
 
 個人用ローカル版の終了条件は、次の一連の操作を利用者が確認できることである。
 
-1. WSL/Docker 上の一つの HTTP/HTTPS 入口へ複数ドメインでアクセスできる。
+1. WSL/Linux 上の Docker または Podman で、一つの HTTP/HTTPS 入口へ複数ドメインでアクセスできる。
 2. 各ドメインが指定されたコンテナまたは手動指定先へ転送される。
 3. 選択したルートについて、将来の意味的リプレイに必要な HTTP リクエスト情報が欠損なく保存される。
 4. 管理画面からルートの作成、複製、無効化、Docker ターゲット選択ができる。
 5. 保存したリクエストを検索、閲覧し、後続版では編集、リプレイ、cURL/fetch 出力ができる。
 6. エラー条件を集約し、同一障害を連続通知しないローカル通知ができる。
 7. 英語 / 日本語を切り替え、フォームのない Overview から全体状態を確認して keyboard で各 workspace へ移動できる。
-8. Docker Compose project / container、ローカル DB 状態、関連ログを個別 CLI や container path を探さず確認できる。
+8. Docker Compose / Podman Compose project、container、ローカル DB 状態、関連ログを個別 CLI や container path を探さず確認できる。
 
 ## 2. 現在の前提
 
@@ -26,6 +26,7 @@
 - Nginx を TLS 終端およびホストルーティングの基盤として維持する。
 - リプレイ UI は初期フェーズに含めないが、記録形式は後の編集・リプレイを妨げてはならない。
 - 管理 UI は login / multi-user を持たず、localhost 以外へ公開しない。
+- container runtime は Docker と Podman の両方を正式対応対象とする。開発・回帰検証は hosted CI に依存せず、runtime を明示した local CI command で実行する。
 
 ### 個人用ローカル版の優先順位
 
@@ -182,10 +183,13 @@ DEV-060:
 - 英語 / 日本語の UI と永続 language selection。
 - フォームを持たない Overview dashboard。
 - 既存 workspace の tab 分離と `Alt+1`〜`Alt+5` shortcut。
+- review remediation として Docker / Podman 共通 runtime adapter、Engine socket 解決、local CI entrypoint を追加し、Podman 上で既存13 suite を再実行する。
 
 DEV-061（DEV-060 合格後に詳細化）:
 
-- Docker Compose project / container の running / stopped / health / port 集約。
+- Docker / Podman host 全体の Compose project / container の running / stopped / health / port 集約。
+- 同一 project だけでなく別 project の container も inventory に表示し、`検出済み` と `router から到達可能` を別状態として扱う。
+- Routes & Containers workspace は container inventory を主画面とし、`domain + container + port` の quick setup を既定にする。route ID、scheme、manual host、description、enabled は詳細設定へ畳む。
 - ProxyConsole SQLite と Docker 上の DB container の local status summary。
 - Runtime Projects workspace と `Alt+6`。
 
@@ -200,7 +204,7 @@ G7 合格条件:
 - 日本語 / 英語で Overview と既存 workspace の代表 flow を完了できる。
 - Overview に設定フォームがなく、統計から詳細 workspace へ遷移できる。
 - shortcut が入力操作を破壊せず、reload 後に language / workspace を復元する。
-- Docker project / container / DB status と local logs を個別 container shell に入らず確認できる。
+- Docker / Podman project、container、DB status と local logs を個別 container shell に入らず確認できる。
 - P1〜P5 の全機能回帰が成功する。
 
 ## 6. タスクまたはプロジェクトを停止する条件
@@ -230,7 +234,86 @@ G7 合格条件:
 
 全体中止は Agent が独断で決定せず、根拠を記録して利用者判断を待つ。
 
-## 7. 次に開始できるタスク
+## 7. 次の順次開発計画
 
-`DEV-060`。P1〜P5 の data / API / workspace が揃っているため、backend business logic を変えずに日英 localization、統計 Overview、既存 workspace shortcut を縦に完成できる。
+並列作業は行わず、次の checkpoint を一件ずつ完了・review してから次へ進む。
+
+### Checkpoint A — DEV-060 review remediation: Docker / Podman compatibility
+
+目的:
+
+- 現在 `docker compose`、`docker cp`、`/var/run/docker.sock` に固定されている起動・検証経路を、Docker と Podman のどちらでも同じ操作契約で実行できるようにする。
+- hosted CI は追加せず、開発端末上の local CI を唯一の統合検証入口とする。
+
+実装項目:
+
+1. `CONTAINER_RUNTIME=auto|docker|podman` を受け取る runtime adapter を一つ追加する。`auto` は利用可能な runtime を一度だけ選択し、混在実行しない。
+2. adapter は少なくとも `compose config/build/up/down/ps/exec/run/start/stop/restart/logs`、container copy、Engine socket path 解決を提供する。
+3. Docker は `/var/run/docker.sock`、rootless Podman は `${XDG_RUNTIME_DIR}/podman/podman.sock` など実環境で解決した socket を利用し、container 内では固定の read-only API path に mount する。socket の `chmod 0666` は廃止する。
+4. discovery backend は Docker-compatible Engine API を利用しつつ、provider を `docker|podman` として返す。既存 API field は互換性を維持し、UI文言は必要な箇所から `Container Engine` へ一般化する。
+5. scripts と全 integration test の直接 `docker` 呼び出し、および Python subprocess 内の `"docker"` を adapter / environment 経由へ移す。
+6. `make ci-local` を追加し、preflight、syntax/config check、全13 suite、cleanup、秘密鍵・runtime artifact の Git 混入確認を一つの command で実行する。runtime 未導入時は明示的に失敗し、成功扱いにしない。
+7. Podman Compose の provider 差異、rootless networking、SELinux volume label、host gateway 名の差異をテストで固定する。Docker固有の挙動へ暗黙 fallback しない。
+
+local CI command（実装後）:
+
+```bash
+CONTAINER_RUNTIME=podman make ci-local
+CONTAINER_RUNTIME=docker make ci-local
+```
+
+受入条件:
+
+- 現在の主利用環境である Podman により全13 suite が成功する。
+- Docker が利用可能なローカル環境でも同じ command contract と全13 suite が成功する。環境が一方しかない場合は未実行側を明記し、両対応完了とは判定しない。
+- cleanup 後に test container、network、volume、証明書秘密鍵、capture/runtime data が Git または実行環境へ意図せず残らない。
+- DEV-060 の独立再検証が成功した時点でのみ `Done` とする。
+
+### Checkpoint B — DEV-061: host-wide inventory
+
+目的:
+
+- ProxyConsole の demo target だけでなく、選択した Engine 上で現在稼働・停止している container と Compose project を把握できるようにする。
+
+実装項目:
+
+1. discovery の既定 inventory scope を host-wide read-only scan にし、provider、project、service、container、image、state、health、network、exposed/published port を集約する。
+2. ProxyConsole system container、同一 project、外部 project、明示的 discoverable label を分類する。表示対象と route target 選択可否を同じ filter にしない。
+3. 各 port に `reachable`、`published-host reachable`、`network attachment required`、`stopped` などの理由付き状態を返す。
+4. 外部 project の container を勝手に network 接続・再起動しない。既存 published port を優先し、変更を伴う network 操作は明示確認と rollback 設計を持つ後続操作に限定する。
+5. demo container は test/example profile に分離し、通常起動時の inventory を占有しない。
+
+受入条件:
+
+- 別 Compose project の実 container が一覧に現れ、ProxyConsole system container と区別できる。
+- container が見えても到達不能な場合は選択不可理由が表示され、既存 route を破壊しない。
+- Docker と Podman の双方で同一の inventory contract を満たす。
+
+### Checkpoint C — DEV-061: simplified route setup
+
+目的:
+
+- 通常の route 作成では、利用者が container 一覧から対象を選び、domain と port を確認するだけで設定を完了できるようにする。
+
+画面構成:
+
+1. 主画面は project grouping、検索、running filter を備えた container inventory とする。
+2. container / port 行の `Route` 操作で compact setup panel を開き、必須入力は `domain`、`container`、`port` のみとする。
+3. route ID は自動生成、scheme は検出値または `http`、enabled は true を既定値にする。
+4. manual host/port、route ID、scheme、description、disabled creation は `詳細設定` disclosure 内へ移す。
+5. apply status と既存 route table は維持するが、診断 detail はエラー時または展開時だけ表示する。
+6. 保存前に routing preview を一行で表示し、保存成功後は実疎通結果と rollback action を表示する。
+
+受入条件:
+
+- running かつ reachable な container から3入力以内で route を作成できる。
+- advanced setting を一度も開かず代表 flow を完了できる。
+- stopped / unreachable target は理由を伴って選択不可となる。
+- 既存の create/edit/copy/disable/delete、manual target、atomic apply/rollback flow は回帰する。
+
+### Checkpoint D — DEV-062: provider-neutral logs
+
+- Docker / Podman Engine API の logs を同じ contract で扱う。
+- provider、project、container、severity、time range で filter し、既存 ProxyConsole / Nginx log と統合する。
+- 任意 host file discovery、external log service、multi-user audit は追加しない。
 

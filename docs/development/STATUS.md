@@ -34,9 +34,10 @@ Mailbox dispatch: `16` (`.agents/dispatch.json`)
 
 ## Next transition
 
-Docker CLI / Docker Engine を利用できる review 環境で `make test` を再実行する。全13 suite の独立再検証が成功した場合のみ DEV-060 を `Done` とし、利用者フィードバックを反映した DEV-061（host-wide container inventory と簡易 route setup）を詳細化する。
+利用者判断により Docker と Podman の両対応、および hosted CI ではなく local CI を製品前提へ追加した。まず DEV-060 review remediation として container runtime adapter、Engine socket 解決、`make ci-local`、全 integration test の runtime-neutral 化を実装する。Podman と Docker の双方で全13 suite を独立再検証できた場合のみ DEV-060 を `Done` とする。その後 DEV-061 の host-wide inventory と簡易 route setup を順次実装する。詳細は `docs/development/PLAN.md` の「次の順次開発計画」を参照する。
 
 ## Blocking items
 
 - 2026-11-24 の独立 review 環境に `docker` command がなく、`make test` は `scripts/verify-config.sh: line 10: docker: command not found` で終了した。詳細は `docs/reviews/DEV-060-review-001.md` を参照する。
+- 現在の orchestrator 環境には `podman` command も存在しないため、runtime compatibility 実装後の local CI は Podman / Docker を利用できるローカル実行環境で行う必要がある。
 - Runtime Projects / Logs は DEV-060 合格後に DEV-061 / DEV-062 として順次詳細化する。

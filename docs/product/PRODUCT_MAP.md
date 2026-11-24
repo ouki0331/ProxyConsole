@@ -1,13 +1,13 @@
 # ProxyConsole プロダクトマップ
 
-更新日: 2026-11-15
+更新日: 2026-11-24
 
 ## L0 プロダクト定義
 
-ProxyConsole は、単一利用者が自分の WSL / Docker 開発環境で、ドメインルーティング、HTTP リクエスト、Docker サービス、ローカル DB 状態、ログ、変更ルール、障害通知を一つの localhost コンソールから把握・操作するためのローカル開発ツールである。
+ProxyConsole は、単一利用者が自分の WSL / Linux 上の Docker または Podman 開発環境で、ドメインルーティング、HTTP リクエスト、container service、ローカル DB 状態、ログ、変更ルール、障害通知を一つの localhost コンソールから把握・操作するためのローカル開発ツールである。
 
-- 対象利用者: 自分の端末と Docker 環境を管理する一人の開発者。
-- 解決する問題: 状態確認のたびに Docker CLI、個別コンテナログ、ブラウザ DevTools、アプリ独自ログ、Nginx 設定を行き来する負担。
+- 対象利用者: 自分の端末と Docker / Podman 環境を管理する一人の開発者。
+- 解決する問題: 状態確認のたびに container CLI、個別コンテナログ、ブラウザ DevTools、アプリ独自ログ、Nginx 設定を行き来する負担。
 - 約束する結果: 「何が動いているか」「どのリクエストが通ったか」「どこで失敗したか」「どの設定が効いているか」を一か所で確認し、必要なローカル操作へすぐ移動できる。
 - 意味のある代替: Docker CLI / Desktop、Nginx 設定ファイル、ブラウザ DevTools、個別ログ、Postman を別々に使用すること。
 
@@ -25,8 +25,9 @@ ProxyConsole は、単一利用者が自分の WSL / Docker 開発環境で、�
 - Overview は統計・状態・workspace への入口だけを表示し、作成・編集フォームを置かない。
 - 設定と編集操作は各 workspace に分離する。
 - 会社共有、マルチユーザー、SSO、RBAC、公開インターネット配備は `Deferred` とする。
-- DB はまず ProxyConsole 自身の SQLite 健全性と Docker 上の DB コンテナ状態を扱う。汎用 SQL クライアントは含めない。
-- ログは Docker API と ProxyConsole が既に管理するローカルログを集約する。任意のホストファイル探索は含めない。
+- container runtime は Docker と Podman を正式対応対象とし、runtime ごとに別 UI / API を作らず provider-neutral contract へ集約する。
+- DB はまず ProxyConsole 自身の SQLite 健全性と Docker / Podman 上の DB コンテナ状態を扱う。汎用 SQL クライアントは含めない。
+- ログは Docker-compatible Engine API と ProxyConsole が既に管理するローカルログを集約する。任意のホストファイル探索は含めない。
 
 ## L1 / L2 / L3 capability map
 
@@ -40,7 +41,7 @@ ProxyConsole は、単一利用者が自分の WSL / Docker 開発環境で、�
 | Console | Localization | `CON-I18N-001` | 英語 / 日本語 UI と永続言語選択 | Ready for Delivery | Not built |
 | Console | Overview | `CON-DASH-001` | フォームを持たないローカル状態 Dashboard | Ready for Delivery | Not built |
 | Console | Navigation | `CON-NAV-001` | workspace tab と keyboard shortcut | Ready for Delivery | Partial |
-| Runtime | Project inventory | `RUN-PROJ-001` | Docker Compose project / container の稼働・停止・health 集約 | Confirmed | Partial |
+| Runtime | Project inventory | `RUN-PROJ-001` | Docker / Podman Compose project / container の稼働・停止・health 集約 | Confirmed | Partial |
 | Runtime | Logs | `RUN-LOG-001` | container / proxy / Nginx log の一覧・tail・filter | Confirmed | Partial |
 | Runtime | Local data | `RUN-DATA-001` | SQLite と DB container の状態サマリ | Confirmed | Partial |
 | Collaboration | Access control | `COL-AUTH-001` | SSO / RBAC / multi-user | Deferred | Not built |
