@@ -463,6 +463,45 @@ try:
     assert ws_runtime["runtimePressed"] == "true", ws_runtime
     print("       PASS: Alt+6 navigated to Runtime Projects")
 
+    # Create a route from the host-wide inventory without opening advanced settings.
+    quick_route = cdp.eval_js(
+        """
+        const deadline = Date.now() + 5000;
+        while (!document.querySelector('.runtime-route-btn:not(:disabled)') && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const routeBtn = document.querySelector('.runtime-route-btn:not(:disabled)');
+        if (!routeBtn) return { opened: false };
+        routeBtn.click();
+        const domain = document.getElementById('quick-route-domain');
+        domain.value = 'runtime-quick.local.test';
+        domain.dispatchEvent(new Event('input', { bubbles: true }));
+        document.getElementById('quick-route-form').dispatchEvent(
+          new Event('submit', { cancelable: true, bubbles: true })
+        );
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const rows = Array.from(document.querySelectorAll('#routes-tbody tr'));
+        const created = rows.find(row => row.dataset.domain === 'runtime-quick.local.test');
+        return {
+          opened: true,
+          created: Boolean(created),
+          routeId: created?.dataset.routeId || null,
+          advancedOpen: document.querySelector('.quick-route-advanced')?.open || false,
+        };
+        """
+    )
+    assert quick_route["opened"] is True, quick_route
+    assert quick_route["created"] is True, quick_route
+    assert quick_route["advancedOpen"] is False, quick_route
+    cleanup_quick = cdp.eval_js(
+        f"""
+        const response = await fetch('/api/v1/routes/{urllib.parse.quote(quick_route['routeId'], safe='')}', {{ method: 'DELETE' }});
+        return {{ ok: response.ok, status: response.status }};
+        """
+    )
+    assert cleanup_quick["ok"] is True, cleanup_quick
+    print("       PASS: Quick route created with domain-only flow and cleaned up")
+
     # Press Alt+1 to return to Overview
     cdp.eval_js(
         """
@@ -529,6 +568,16 @@ try:
     deep_notif = cdp.eval_js("return document.getElementById('notifications-workspace')?.hidden;")
     assert deep_notif is False, "Deep link must open Notifications workspace"
     print("       PASS: Deep link from Incidents card navigated to Notifications workspace")
+
+    cdp.eval_js("window.setWorkspaceView('overview');")
+    cdp.eval_js(
+        """
+        document.querySelector('#overview-card-docker .overview-deep-link').click();
+        """
+    )
+    deep_runtime = cdp.eval_js("return document.getElementById('runtime-workspace')?.hidden;")
+    assert deep_runtime is False, "Container card deep link must open Runtime Projects"
+    print("       PASS: Deep link from Container card navigated to Runtime Projects")
 
     # 6. Fallback on invalid stored workspace (AC-11)
     print("    -> [Test 7] Verifying fallback to Overview on invalid stored workspace")
