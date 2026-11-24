@@ -1,13 +1,13 @@
 {
   "protocol_version": 1,
-  "handled_dispatch_id": 16,
+  "handled_dispatch_id": 17,
   "task_id": "DEV-060",
-  "state": "ready_for_review",
-  "owner": "orchestrator",
-  "updated_at": "2026-11-15T13:05:55Z",
-  "artifact_commit": "f18d6f4",
-  "verification_command": "make test",
-  "verification_passed": true,
-  "summary": "DEV-060 (Japanese localization, overview dashboard, and workspace shortcuts) を完了しました。日英i18nカタログ、フォームなしOverview、Alt+1..5ショートカット、390pxレスポンシブを実装し、全13統合テストスイート (DEV-001..042回帰および新設CDP E2Eテスト) の成功を確認しました。現在 Ready for review です。",
+  "state": "working",
+  "owner": "implementer",
+  "updated_at": "2026-11-24T14:54:44Z",
+  "artifact_commit": null,
+  "verification_command": "node --check web/console/app.js && python3 -m py_compile services/recorder/*.py tests/helpers/echo_server.py && bash -n scripts/*.sh tests/integration/*.sh",
+  "verification_passed": null,
+  "summary": "dispatch 17 を受領し、Docker / Podman 共通 runtime adapter、Engine socket 解決、runtime-neutral scripts/tests、local CI entrypoint の実装を開始しました。DEV-061 の host-wide inventory と route UI 再設計は先取りしません。",
   "blocker": null
 }
