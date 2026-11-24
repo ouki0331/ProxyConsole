@@ -264,10 +264,10 @@ CONTAINER_RUNTIME=docker make ci-local
 
 受入条件:
 
-- 現在の主利用環境である Podman により全13 suite が成功する。
-- Docker が利用可能なローカル環境でも同じ command contract と全13 suite が成功する。環境が一方しかない場合は未実行側を明記し、両対応完了とは判定しない。
+- 現在の主利用環境である Podman により、利用可能な環境では全13 suite を実行する。権限、runtime、socket、Compose provider の制約で実行不能な場合は `Deferred CI` として証拠を残し、次の実装 checkpoint へ進める。
+- Docker が利用可能なローカル環境でも同じ command contract と全13 suite を実行する。環境がない場合は未実行側を明記して後日補完し、成功したとは表現しない。
 - cleanup 後に test container、network、volume、証明書秘密鍵、capture/runtime data が Git または実行環境へ意図せず残らない。
-- DEV-060 の独立再検証が成功した時点でのみ `Done` とする。
+- static check と runtime adapter の非破壊的検証が成功すれば code checkpoint の review は進められる。Deferred CI は G7 を閉じる前の verification backlog として保持する。
 
 ### Checkpoint B — DEV-061: host-wide inventory
 

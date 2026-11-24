@@ -1,19 +1,19 @@
 {
   "protocol_version": 1,
-  "dispatch_id": 16,
-  "issued_at": "2026-11-15T21:36:53+09:00",
+  "dispatch_id": 17,
+  "issued_at": "2026-11-24T23:54:44+09:00",
   "issued_by": "orchestrator",
   "recipient": "implementer",
-  "command": "execute_task",
+  "command": "address_review_and_requirement_change",
   "task_id": "DEV-060",
   "task_file": "docs/tasks/DEV-060.md",
-  "base_commit": "d290465",
+  "base_commit": "00f23c1",
   "previous_task": {
-    "task_id": "DEV-050",
-    "decision": "deferred_by_product_scope",
-    "review_file": null
+    "task_id": "DEV-060",
+    "decision": "blocked_by_missing_container_runtime_and_replanned",
+    "review_file": "docs/reviews/DEV-060-review-001.md"
   },
-  "required_action": "Pull origin/main, acknowledge dispatch 16, read docs/product/PRODUCT_MAP.md and docs/tasks/DEV-060.md, implement English/Japanese localization, form-free Overview, and Alt+1..5 workspace switching without adding company-sharing or multi-user features, run the full regression and browser E2E evidence, push, then wait for review.",
+  "required_action": "Pull origin/main, acknowledge dispatch 17, read docs/product/PRODUCT_MAP.md, docs/tasks/DEV-060.md, and docs/reviews/DEV-060-review-001.md. Implement the Docker/Podman runtime adapter, provider-neutral Engine socket handling, runtime-neutral scripts/tests, and make ci-local without starting DEV-061 host-wide inventory or route UI redesign. Run static checks and each available local runtime CI exactly once per completed phase, record unavailable runtime evidence without claiming success, push, then wait for review.",
   "state": "assigned"
 }
 
