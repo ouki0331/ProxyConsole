@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ProxyConsole — Route &amp; Docker Target Management</title>
+  <title>ProxyConsole — Route &amp; Container Target Management</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="app-header">
     <div class="header-brand">
       <h1>ProxyConsole</h1>
-      <span class="subtitle">Localhost Route, Docker Target, Request Viewer &amp; Replay Console</span>
+      <span class="subtitle">Localhost Route, Container Target, Request Viewer &amp; Replay Console</span>
     </div>
     <nav aria-label="Console Workspaces" class="header-nav">
       <button type="button" id="view-all-btn" class="btn btn-sm btn-secondary" aria-pressed="false" hidden>
@@ -52,7 +52,7 @@
     <section id="feedback-banner" class="feedback-banner" role="status" aria-live="polite" data-state="idle" data-error-code="">
       <div class="feedback-content">
         <strong id="feedback-title" data-i18n="feedback.ready_title">Ready</strong>
-        <span id="feedback-message" data-i18n="feedback.ready_msg">Loaded route and Docker discovery state from local control API.</span>
+        <span id="feedback-message" data-i18n="feedback.ready_msg">Loaded route and Container Engine discovery state from local control API.</span>
         <span id="feedback-hint" class="feedback-hint"></span>
       </div>
     </section>
@@ -105,10 +105,10 @@
           </div>
         </section>
 
-        <!-- 3. Docker Containers Card -->
+        <!-- 3. Container Engine Targets Card -->
         <section id="overview-card-docker" class="card overview-card" aria-labelledby="card-docker-heading">
           <div class="overview-card-header">
-            <h3 id="card-docker-heading" data-i18n="overview.card_docker_title">Docker Target Containers</h3>
+            <h3 id="card-docker-heading" data-i18n="overview.card_docker_title">Container Engine Targets</h3>
             <span id="overview-docker-avail-badge" class="badge badge-neutral" data-i18n="status.checking">Checking...</span>
           </div>
           <div class="overview-card-body">
@@ -116,7 +116,7 @@
             <p class="metric-description" id="overview-docker-desc"><span id="overview-docker-stopped-count">0</span> stopped containers discovered.</p>
           </div>
           <div class="overview-card-footer">
-            <button type="button" class="btn-link overview-deep-link" data-target-workspace="routes" data-target-scroll="docker-discovery-section" data-i18n="overview.view_docker_deep">View Docker Containers &rarr;</button>
+            <button type="button" class="btn-link overview-deep-link" data-target-workspace="routes" data-target-scroll="docker-discovery-section" data-i18n="overview.view_docker_deep">View Containers &rarr;</button>
           </div>
         </section>
 
@@ -282,13 +282,13 @@
         <section id="docker-discovery-section" class="card" aria-labelledby="discovery-heading">
           <div class="card-header">
             <div>
-              <h2 id="discovery-heading">Docker Containers &amp; Port Candidates</h2>
-              <p class="card-subtitle">Discovered via control-api Docker Engine socket. Select a running port candidate to populate the route form.</p>
+              <h2 id="discovery-heading">Containers &amp; Port Candidates</h2>
+              <p class="card-subtitle">Discovered via the control-api Container Engine socket. Select a running port candidate to populate the route form.</p>
             </div>
             <div class="discovery-controls">
               <span id="discovery-availability-badge" class="badge badge-neutral" data-available="true">Checking...</span>
               <button type="button" id="refresh-discovery-btn" class="btn btn-secondary">
-                Refresh Docker
+                Refresh Containers
               </button>
             </div>
           </div>
@@ -302,7 +302,7 @@
 
           <div id="discovery-error-box" class="discovery-error-box" role="alert" hidden>
             <div class="discovery-error-text">
-              <strong>Docker Discovery Unavailable:</strong>
+              <strong>Container Engine Discovery Unavailable:</strong>
               <span id="discovery-error-message"></span>
               <p class="fallback-note">Existing routes remain active. You can continue creating and editing routes using Manual Scheme / Host / Port mode.</p>
             </div>

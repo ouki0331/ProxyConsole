@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/container-runtime.sh"
 COMPOSE_FILE="${ROOT_DIR}/deploy/compose/docker-compose.yml"
 EDGE_HTTPS_PORT="${EDGE_HTTPS_PORT:-8443}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-18480}"
@@ -1123,7 +1125,7 @@ try:
     assert unavail_state["badgeAvail"] == "false", unavail_state
     assert unavail_state["errHidden"] is False and unavail_state["errCode"] == "rules_unavailable", unavail_state
 
-    # Switch to Routes & Docker workspace and verify routes & containers are still loaded and usable
+    # Switch to Routes & Containers workspace and verify routes & containers are still loaded and usable
     cdp.eval_js("document.getElementById('view-routes-btn').click();")
     routes_ok = cdp.eval_js(
         """

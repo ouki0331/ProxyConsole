@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/container-runtime.sh"
 COMPOSE_FILE="${ROOT_DIR}/deploy/compose/docker-compose.yml"
 EDGE_HTTPS_PORT="${EDGE_HTTPS_PORT:-8443}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-18480}"
@@ -757,7 +759,7 @@ try:
     cdp.eval_js("document.getElementById('refresh-discovery-btn').click();")
     cdp.wait_idle()
 
-    # --- STEP 10: Docker Unavailable Fallback & Nginx Apply Error / Retry in Browser UI (AC-10, AC-11, Rule 5, Rule 8) ---
+    # --- STEP 10: Engine Unavailable Fallback & Nginx Apply Error / Retry in Browser UI (AC-10, AC-11, Rule 5, Rule 8) ---
     print("    -> [10/10] Testing Docker unavailable manual fallback and Nginx apply error/retry in browser (AC-10, AC-11, Rule 5, Rule 8)")
     api_post("/api/v1/discovery/config", {"socket_path_override": "/var/run/nonexistent-docker.sock"})
     cdp.eval_js("document.getElementById('refresh-discovery-btn').click();")
@@ -774,7 +776,7 @@ try:
         """
     )
     assert unavail_ui["badgeAvail"] == "false", unavail_ui
-    assert unavail_ui["badgeText"] == "Docker Unavailable", unavail_ui
+    assert unavail_ui["badgeText"] == "Engine Unavailable", unavail_ui
     assert unavail_ui["errBoxHidden"] is False, unavail_ui
     assert "nonexistent-docker.sock" in unavail_ui["errMsg"], unavail_ui
 

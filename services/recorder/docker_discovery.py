@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Docker container discovery and route target selection service (DEV-021).
+"""Container Engine discovery and route target selection service (DEV-021).
 
-Queries the local Docker Engine API over Unix domain socket (/var/run/docker.sock)
-from the control plane, extracts container metadata, network attachments, and
-internal/exposed ports, filters out ProxyConsole self-infrastructure containers
-by default, and resolves selected (container, port) pairs into internal network
-upstream targets for RouteManager.
+Queries the Docker-compatible Docker or Podman Engine API over a Unix domain
+socket from the control plane, extracts container metadata, network attachments,
+and internal/exposed ports, filters out ProxyConsole self-infrastructure
+containers by default, and resolves selected (container, port) pairs into
+internal network upstream targets for RouteManager.
 """
 
 from __future__ import annotations
@@ -87,6 +87,8 @@ def _parse_port_spec(spec: str) -> tuple[int, str] | None:
 class DockerDiscoveryService:
     def __init__(self, store: CaptureIndexStore) -> None:
         self.store = store
+        provider = os.environ.get("CONTAINER_ENGINE_PROVIDER", "docker")
+        self.provider = provider if provider in ("docker", "podman") else "docker"
         self.compose_project = os.environ.get(
             "COMPOSE_PROJECT_NAME", DEFAULT_COMPOSE_PROJECT
         )
@@ -548,6 +550,7 @@ class DockerDiscoveryService:
             return {
                 "available": True,
                 "status": "ok",
+                "provider": self.provider,
                 "socket_path": socket_path,
                 "refreshed_at": now_iso,
                 "error": None,
@@ -579,6 +582,7 @@ class DockerDiscoveryService:
             return {
                 "available": False,
                 "status": "unavailable",
+                "provider": self.provider,
                 "socket_path": socket_path,
                 "refreshed_at": now_iso,
                 "error": err_msg,
@@ -600,6 +604,7 @@ class DockerDiscoveryService:
             return {
                 "available": False,
                 "status": "uninitialized",
+                "provider": self.provider,
                 "socket_path": socket_path,
                 "socket_path_override": None,
                 "last_refresh_at": None,
@@ -613,6 +618,7 @@ class DockerDiscoveryService:
         return {
             "available": bool(row["available"]),
             "status": str(row["status"]),
+            "provider": self.provider,
             "socket_path": socket_path,
             "socket_path_override": row["socket_path_override"],
             "last_refresh_at": row["last_refresh_at"],
@@ -646,6 +652,7 @@ class DockerDiscoveryService:
         return {
             "available": scan["available"],
             "status": scan["status"],
+            "provider": scan["provider"],
             "socket_path": scan["socket_path"],
             "refreshed_at": scan["refreshed_at"],
             "error": scan["error"],
@@ -672,6 +679,7 @@ class DockerDiscoveryService:
         return {
             "available": scan["available"],
             "status": scan["status"],
+            "provider": scan["provider"],
             "socket_path": scan["socket_path"],
             "refreshed_at": scan["refreshed_at"],
             "error": scan["error"],
@@ -703,6 +711,7 @@ class DockerDiscoveryService:
         return {
             "available": scan["available"],
             "status": scan["status"],
+            "provider": scan["provider"],
             "socket_path": scan["socket_path"],
             "refreshed_at": scan["refreshed_at"],
             "error": scan["error"],
@@ -728,7 +737,7 @@ class DockerDiscoveryService:
         scan = self._scan_docker(scope=scope)
         if not scan["available"]:
             raise DiscoveryUnavailableError(
-                f"Docker discovery is unavailable ({scan['error']}). "
+                f"Container Engine discovery is unavailable ({scan['error']}). "
                 "Specify manual upstream_host and upstream_port instead."
             )
 

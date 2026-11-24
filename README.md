@@ -1,8 +1,27 @@
 # ProxyConsole
 
-ProxyConsole は、単一利用者の WSL / Docker ローカル開発環境向けの統合コンソールです。HTTP / HTTPS の入口を統一的に受け持ち、ドメイン単位でコンテナへルーティングし、リクエストの保存と再送、変更ルールの適用、ローカル障害通知を管理します。さらにローカルプロジェクト、データベース状態、コンテナログを段階的に集約します。
+ProxyConsole は、単一利用者の WSL / Linux 上の Docker / Podman ローカル開発環境向け統合コンソールです。HTTP / HTTPS の入口を統一的に受け持ち、ドメイン単位でコンテナへルーティングし、リクエストの保存と再送、変更ルールの適用、ローカル障害通知を管理します。さらにローカルプロジェクト、データベース状態、コンテナログを段階的に集約します。
 
 P1〜P5 のローカルプロキシ、キャプチャ、ルーティング管理、リクエスト再送、ルールエンジン、通知機能はすでに実装され、独立レビューに合格しています。本プロダクトは localhost 単一利用者での利用を前提としており、会社共有、マルチユーザー、またはパブリック環境への配備を対象としません。
+
+## Container runtime
+
+runtime は明示指定できます。`auto` は Podman、Docker の順で利用可能な一方だけを選択し、一回の実行中に混在させません。
+
+```bash
+CONTAINER_RUNTIME=podman make up
+CONTAINER_RUNTIME=docker make up
+CONTAINER_RUNTIME=auto make up
+```
+
+rootless Podman は通常 `${XDG_RUNTIME_DIR}/podman/podman.sock` を使用します。別のUnix socketを使う場合は `CONTAINER_ENGINE_SOCKET` を指定します。ProxyConsole はhost socketのpermissionを変更しません。
+
+フェーズ単位のローカルCIは次で実行します。runtime、権限、socket、Compose providerが利用できない場合は成功扱いにせず、Deferred CIとして後日補完します。
+
+```bash
+CONTAINER_RUNTIME=podman make ci-local
+CONTAINER_RUNTIME=docker make ci-local
+```
 
 ## 現在の運用方式
 
@@ -26,4 +45,4 @@ P1〜P5 のローカルプロキシ、キャプチャ、ルーティング管理
 
 ## 現在の状況
 
-`DEV-060`（英語/日本語UI、フォームのない統計Overviewダッシュボード、既存ワークスペースのショートカット切替）の実装と検証が完了し、`Ready for review` 状態です。タスクは Git メールボックスを介して自動的にディスパッチされます。
+`DEV-060` の英語/日本語UI、フォームのない統計Overview、ワークスペース切替は実装済みです。現在は review remediation として Docker / Podman 共通runtime、provider-neutral Engine socket、local CI entrypointを実装中です。タスクは Git メールボックスを介して自動的にディスパッチされます。

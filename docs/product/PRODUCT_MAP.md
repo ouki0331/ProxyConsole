@@ -70,7 +70,7 @@ ProxyConsole は、単一利用者が自分の WSL / Linux 上の Docker また�
 ### CON-NAV-001 Workspace navigation
 
 - Trigger: tab click または `Alt+1`〜`Alt+7`。
-- Mapping: 1 Overview、2 Routes & Docker、3 Requests & Replay、4 Modification Rules、5 Notifications、6 Runtime Projects、7 Logs。
+- Mapping: 1 Overview、2 Routes & Containers、3 Requests & Replay、4 Modification Rules、5 Notifications、6 Runtime Projects、7 Logs。
 - Rules: input / textarea / select / contenteditable 編集中は shortcut を発火しない。既存 browser shortcut と衝突して実行不能な場合は tab click を必ず残す。
 - Visible behavior: active tab、tooltip / shortcut help、focus feedback、選択 workspace の端末内保存。
 - Boundary case: 未実装 workspace は shortcut mapping を先取りせず、実装 task と同時に追加する。DEV-060 では 1〜5 を実装し、6〜7 は後続 task で追加する。

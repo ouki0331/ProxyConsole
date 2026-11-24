@@ -6,6 +6,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/container-runtime.sh"
 COMPOSE_FILE="${ROOT_DIR}/deploy/compose/docker-compose.yml"
 EDGE_HTTPS_PORT="${EDGE_HTTPS_PORT:-8443}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-18480}"
@@ -122,15 +124,15 @@ assert networks_cfg["edge_inspector_net"].get("internal") in (False, None), netw
 assert networks_cfg["inspector_router_net"].get("internal") is True, networks_cfg["inspector_router_net"]
 assert networks_cfg["router_targets_net"].get("internal") is True, networks_cfg["router_targets_net"]
 
-# 3. Verify volume & Docker socket mounts
-docker_sock_mounts = []
+# 3. Verify volume & Container Engine socket mounts
+engine_socket_mounts = []
 for svc_name, svc_def in sorted(services_cfg.items()):
     for v in svc_def.get("volumes", []) or []:
-        if "/var/run/docker.sock" in str(v.get("source", "")) or "/var/run/docker.sock" in str(v.get("target", "")):
-            docker_sock_mounts.append({"service": svc_name, "source": v.get("source"), "target": v.get("target")})
+        if str(v.get("target", "")) == "/run/proxyconsole/engine.sock":
+            engine_socket_mounts.append({"service": svc_name, "source": v.get("source"), "target": v.get("target")})
 
-assert len(docker_sock_mounts) == 1 and docker_sock_mounts[0]["service"] == "control-api", (
-    f"Only control-api may mount /var/run/docker.sock: {docker_sock_mounts}"
+assert len(engine_socket_mounts) == 1 and engine_socket_mounts[0]["service"] == "control-api", (
+    f"Only control-api may mount the Container Engine socket: {engine_socket_mounts}"
 )
 
 # 4. Mechanically scan services/recorder/docker_discovery.py for Docker API HTTP methods & endpoints (AC-6)
@@ -147,7 +149,7 @@ inventory_summary = {
         k: {"driver": v.get("driver"), "internal": bool(v.get("internal", False))}
         for k, v in sorted(networks_cfg.items())
     },
-    "docker_socket_mounts": docker_sock_mounts,
+    "engine_socket_mounts": engine_socket_mounts,
     "docker_api_operations": {
         "http_methods": sorted(set(http_requests)),
         "endpoints": docker_paths,

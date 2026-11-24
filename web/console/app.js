@@ -8,16 +8,16 @@ const HOST_RE = /^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
 const I18N_CATALOG = {
   en: {
     app: {
-      title: "ProxyConsole — Route & Docker Target Management",
+      title: "ProxyConsole — Route & Container Target Management",
       heading: "ProxyConsole",
-      subtitle: "Localhost Route, Docker Target, Request Viewer & Replay Console",
+      subtitle: "Localhost Route, Container Target, Request Viewer & Replay Console",
     },
     header: {
-      subtitle: "Localhost Route, Docker Target, Request Viewer & Replay Console",
+      subtitle: "Localhost Route, Container Target, Request Viewer & Replay Console",
     },
     nav: {
       overview: "Overview",
-      routes: "Routes & Docker",
+      routes: "Routes & Containers",
       requests: "Requests & Replay",
       rules: "Modification Rules",
       notifications: "Notifications",
@@ -53,7 +53,7 @@ const I18N_CATALOG = {
     },
     feedback: {
       ready_title: "Ready",
-      ready_msg: "Loaded route and Docker discovery state from local control API.",
+      ready_msg: "Loaded route and Container Engine discovery state from local control API.",
     },
     status: {
       healthy: "Healthy",
@@ -84,8 +84,8 @@ const I18N_CATALOG = {
       card_routes_title: "Domain Routes & Sync",
       routes_active_label: "Enabled / Total domain routes.",
       manage_routes_deep: "Manage Routes & Targets →",
-      card_docker_title: "Docker Target Containers",
-      view_docker_deep: "View Docker Containers →",
+      card_docker_title: "Container Engine Targets",
+      view_docker_deep: "View Containers →",
       card_captures_title: "HTTP Captures",
       captures_in_24h: "Captures recorded in last 24h",
       total_indexed: "total indexed",
@@ -116,11 +116,11 @@ const I18N_CATALOG = {
       th_target_state: "Target State",
       th_apply_status: "Apply Status",
       th_actions: "Actions",
-      docker_heading: "Docker Containers & Port Candidates",
-      docker_subtitle: "Discovered via control-api Docker Engine socket. Select a running port candidate to populate the route form.",
-      refresh_docker_btn: "Refresh Docker",
+      docker_heading: "Containers & Port Candidates",
+      docker_subtitle: "Discovered via the control-api Container Engine socket. Select a running port candidate to populate the route form.",
+      refresh_docker_btn: "Refresh Containers",
       show_system_containers: "Show ProxyConsole system containers (read-only)",
-      docker_empty: "No Docker containers discovered on local Docker daemon.",
+      docker_empty: "No containers discovered on the selected local Container Engine.",
       th_service: "Service / Name",
       th_container_id: "Container ID",
       th_state: "State",
@@ -180,7 +180,7 @@ const I18N_CATALOG = {
   },
   ja: {
     app: {
-      title: "ProxyConsole — ルートとDockerターゲット管理",
+      title: "ProxyConsole — ルートとコンテナターゲット管理",
       heading: "ProxyConsole",
       subtitle: "ローカル開発用 ルーティング・Dockerターゲット・リクエスト監視・再送コンソール",
     },
@@ -189,7 +189,7 @@ const I18N_CATALOG = {
     },
     nav: {
       overview: "概要",
-      routes: "ルートとDocker",
+      routes: "ルートとコンテナ",
       requests: "リクエストと再送",
       rules: "変更ルール",
       notifications: "通知",
@@ -256,8 +256,8 @@ const I18N_CATALOG = {
       card_routes_title: "ドメインルート・同期状態",
       routes_active_label: "有効 / 全ドメインルート数。",
       manage_routes_deep: "ルートとターゲットを管理 →",
-      card_docker_title: "Docker ターゲットコンテナ",
-      view_docker_deep: "Docker コンテナ一覧 →",
+      card_docker_title: "コンテナエンジンのターゲット",
+      view_docker_deep: "コンテナ一覧 →",
       card_captures_title: "HTTP キャプチャ",
       captures_in_24h: "直近24時間に記録されたリクエスト",
       total_indexed: "件 登録済",
@@ -288,11 +288,11 @@ const I18N_CATALOG = {
       th_target_state: "状態",
       th_apply_status: "適用状況",
       th_actions: "操作",
-      docker_heading: "Docker コンテナとポート候補",
-      docker_subtitle: "control-api経由でDocker Engineソケットから自動検出。稼働中の候補を選択してルート入力欄へ反映できます。",
-      refresh_docker_btn: "Docker を再検出",
+      docker_heading: "コンテナとポート候補",
+      docker_subtitle: "control-api経由でコンテナエンジンのソケットから自動検出します。稼働中の候補を選択してルート入力欄へ反映できます。",
+      refresh_docker_btn: "コンテナを再検出",
       show_system_containers: "ProxyConsole システムコンテナを表示 (読取専用)",
-      docker_empty: "ローカルDockerデーモン上で検出されたコンテナはありません。",
+      docker_empty: "選択中のローカルコンテナエンジンで検出されたコンテナはありません。",
       th_service: "サービス名 / 名前",
       th_container_id: "コンテナID",
       th_state: "状態",
@@ -881,8 +881,8 @@ function renderDockerDiscovery() {
   const available = Boolean(appState.discoveryAvailable);
   discoveryAvailabilityBadge.dataset.available = String(available);
   discoveryAvailabilityBadge.textContent = available
-    ? "Docker Available"
-    : "Docker Unavailable";
+    ? "Engine Available"
+    : "Engine Unavailable";
   discoveryAvailabilityBadge.className = `badge ${
     available ? "badge-success" : "badge-danger"
   }`;
@@ -904,7 +904,7 @@ function renderDockerDiscovery() {
   defaultOpt.value = "";
   defaultOpt.textContent = available
     ? "-- Select a container:port target --"
-    : "-- Docker discovery unavailable (use Manual Mode) --";
+    : "-- Container Engine discovery unavailable (use Manual Mode) --";
   routeTargetSelect.appendChild(defaultOpt);
 
   for (const t of appState.targets) {
@@ -932,7 +932,7 @@ function renderDockerDiscovery() {
     routeTargetSelect.value = prevSelected;
   }
 
-  // Render Docker Containers & Ports table
+  // Render Container Engine targets and ports table
   dockerTbody.textContent = "";
   if (!appState.containers || appState.containers.length === 0) {
     discoveryEmptyState.hidden = false;
@@ -1106,12 +1106,12 @@ async function loadAllState({
       if (!appState.discoveryAvailable) {
         setFeedback(
           "error",
-          "Docker Discovery Unavailable",
+          "Container Engine Discovery Unavailable",
           appState.discoveryError ||
-            "Docker socket could not be reached. Manual upstream target mode is available.",
+            "Container Engine socket could not be reached. Manual upstream target mode is available.",
           {
             errorCode: "discovery_unavailable",
-            hint: "Switch to 'Manual Scheme / Host / Port' to create or edit routes while Docker discovery is unavailable.",
+            hint: "Switch to 'Manual Scheme / Host / Port' to create or edit routes while Container Engine discovery is unavailable.",
           }
         );
       } else if (

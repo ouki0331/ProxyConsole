@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/container-runtime.sh"
 COMPOSE_FILE="${ROOT_DIR}/deploy/compose/docker-compose.yml"
 EDGE_HTTPS_PORT="${EDGE_HTTPS_PORT:-8443}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-18480}"
@@ -57,6 +59,10 @@ cli_t_data = json.loads(os.environ["CLI_TARGETS_JSON"])
 assert c_data["available"] is True, c_data
 assert t_data["available"] is True, t_data
 assert cli_t_data["available"] is True, cli_t_data
+expected_provider = os.environ["CONTAINER_ENGINE_PROVIDER"]
+assert c_data["provider"] == expected_provider, c_data
+assert t_data["provider"] == expected_provider, t_data
+assert cli_t_data["provider"] == expected_provider, cli_t_data
 
 by_svc = {c["service_name"]: c for c in c_data["items"]}
 assert "echo-a" in by_svc and "echo-b" in by_svc, by_svc.keys()

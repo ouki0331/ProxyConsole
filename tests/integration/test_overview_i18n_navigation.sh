@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/container-runtime.sh"
 COMPOSE_FILE="${ROOT_DIR}/deploy/compose/docker-compose.yml"
 EDGE_HTTPS_PORT="${EDGE_HTTPS_PORT:-8443}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-18480}"
@@ -327,7 +329,7 @@ try:
     assert "ProxyConsole" in ja_state["title"], ja_state
     assert "システム概要" in ja_state["overviewHeading"], ja_state
     assert "概要" in ja_state["overviewBtnText"], ja_state
-    assert "ルートとDocker" in ja_state["routesBtnText"], ja_state
+    assert "ルートとコンテナ" in ja_state["routesBtnText"], ja_state
     assert "リクエストと再送" in ja_state["requestsBtnText"], ja_state
     assert "変更ルール" in ja_state["rulesBtnText"], ja_state
     assert ja_state["savedLocale"] == "ja", ja_state
@@ -373,7 +375,7 @@ try:
     assert ws_state["routesHidden"] is False, ws_state
     assert ws_state["routesPressed"] == "true", ws_state
     assert ws_state["savedWs"] == "routes", ws_state
-    print("       PASS: Alt+2 navigated to Routes & Docker")
+    print("       PASS: Alt+2 navigated to Routes & Containers")
 
     # Press Alt+3 for Requests
     cdp.eval_js(
