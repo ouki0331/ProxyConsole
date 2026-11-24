@@ -23,4 +23,3 @@ if [[ "${1:-}" == "compose" ]]; then
 fi
 
 exec "${CONTAINER_ENGINE_BIN}" "$@"
-

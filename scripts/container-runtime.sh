@@ -109,4 +109,3 @@ fi
 
 unset _pc_runtime_request _pc_docker_bin _pc_podman_bin _pc_default_socket
 unset _pc_runtime_dir _pc_socket_candidate _pc_script_dir
-

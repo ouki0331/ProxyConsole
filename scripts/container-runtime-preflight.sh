@@ -22,4 +22,3 @@ fi
 
 docker compose version
 echo "[preflight] PASS: provider=${CONTAINER_ENGINE_PROVIDER} socket=${CONTAINER_ENGINE_SOCKET}"
-
