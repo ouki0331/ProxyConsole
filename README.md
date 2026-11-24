@@ -45,4 +45,4 @@ CONTAINER_RUNTIME=docker make ci-local
 
 ## 現在の状況
 
-`DEV-060` の英語/日本語UI、フォームのない統計Overview、ワークスペース切替は実装済みです。現在は review remediation として Docker / Podman 共通runtime、provider-neutral Engine socket、local CI entrypointを実装中です。タスクは Git メールボックスを介して自動的にディスパッチされます。
+`DEV-060` の英語/日本語UI、フォームのない統計Overview、Docker / Podman共通runtimeはレビュー承認済みです。現在は`DEV-061`のhost-wide container inventory、Runtime Projects、簡易route設定が実装され、レビュー待ちです。タスクはGitメールボックスを介して自動的にディスパッチされます。

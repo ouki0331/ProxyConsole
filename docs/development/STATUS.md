@@ -4,10 +4,10 @@ Updated: 2026-11-24
 Phase: P7
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 deferred / G7 pending
 Active task: DEV-061
-Task status: In progress
-Owner: implementer
+Task status: Ready for review
+Owner: orchestrator
 Last verified commit: `491aae5` (DEV-060 review 002 approved; static/runtime unit evidence passed, Docker/Podman integration CI deferred by environment)
-Last substantive remote progress: `9ffc51d` (Docker / Podman runtime adapter, provider-neutral socket, runtime-neutral tests, and local CI entrypoint implemented)
+Last substantive remote progress: `bcedfb3` (host-wide inventory, Runtime Projects, quick route, demo profile separation, and browser E2E definition implemented)
 Task definition baseline: `491aae5`
 Dispatched at: 2026-11-25 00:25 JST
 Mailbox dispatch: `18` (`.agents/dispatch.json`)
@@ -35,10 +35,11 @@ Mailbox dispatch: `18` (`.agents/dispatch.json`)
 - dispatch 17 のruntime互換実装、static check、runtime unit testは成功した。Podman / Docker local CIは実行環境にruntimeがないためDeferred CIとして残し、`Ready for review` とした。
 - DEV-060 review 002はblocking findingなしでApprovedとなり、`Done`とした。Deferred CIはG7完了前のbacklogに残した。
 - DEV-061を開始し、host-wide inventory、Runtime Projects、簡易route setup、demo profile分離をdispatch 18で割り当てた。
+- DEV-061のbackend/UI/test実装とstatic/unit検証が完了した。Podman local CIはruntime未導入でDeferredとなり、`Ready for review`とした。
 
 ## Next transition
 
-実装AgentがDEV-061に従い、host-wide inventory、Runtime Projects workspace、quick route / advanced disclosure、demo profile分離を順次実装する。phase完了時に利用可能なruntimeでlocal CIを一回実行し、環境制約時はDeferred CIとして記録してDEV-062へ進む。
+orchestratorがDEV-061 artifact `5b3ad24`、`6916904`、`bcedfb3`をreviewする。blocking defectがなければDeferred CIをbacklogに保持してDEV-062 provider-neutral logsへ進む。
 
 ## Blocking items
 
@@ -49,3 +50,4 @@ Mailbox dispatch: `18` (`.agents/dispatch.json`)
 
 - Podman local CI: runtime / permission を利用できるローカル環境で dispatch 17 実装後に実行する。
 - Docker local CI: Docker を利用できるローカル環境で同じ `make ci-local` contract を後日実行する。
+- DEV-061 browser/integration: host-wide external project、published host gateway、profile分離、Runtime Projects、quick routeを実Podman/Docker環境で補完する。
