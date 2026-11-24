@@ -4,10 +4,10 @@ Updated: 2026-11-24
 Phase: P7
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 deferred / G7 pending
 Active task: DEV-060
-Task status: In progress
-Owner: implementer
+Task status: Ready for review
+Owner: orchestrator
 Last verified commit: `8a84edc` (DEV-042 approved by independent review 002; Review 001 findings fixed and all 12 suites verified)
-Last substantive remote progress: `00f23c1` (Docker / Podman compatibility, local CI, host-wide inventory, and simplified route setup plan recorded)
+Last substantive remote progress: `9ffc51d` (Docker / Podman runtime adapter, provider-neutral socket, runtime-neutral tests, and local CI entrypoint implemented)
 Task definition baseline: `d290465`
 Dispatched at: 2026-11-24 23:54 JST
 Mailbox dispatch: `17` (`.agents/dispatch.json`)
@@ -32,10 +32,11 @@ Mailbox dispatch: `17` (`.agents/dispatch.json`)
 - `docs/product/PRODUCT_MAP.md` で個人用 local development console の製品境界を固定した。
 - DEV-060 の日英UI、Overview、Navigation 実装は実装 Agent の全13 suite で成功したが、独立 review 環境に container runtime がなく review 001 は `Blocked` となった。
 - 利用者判断により Docker / Podman 両対応と local CI を製品前提へ追加し、dispatch 17 で DEV-060 review remediation を開始した。
+- dispatch 17 のruntime互換実装、static check、runtime unit testは成功した。Podman / Docker local CIは実行環境にruntimeがないためDeferred CIとして残し、`Ready for review` とした。
 
 ## Next transition
 
-実装 Agent が dispatch 17 に従い、container runtime adapter、Engine socket 解決、`make ci-local`、全 integration test の runtime-neutral 化を実装・検証する。成果 push 後に orchestrator が独立 review を行う。権限・runtime・socket・Compose provider 制約で local CI を実行できない場合は `Deferred CI` として証拠を残し、成功扱いにはせず次の実装へ進む。DEV-061 の host-wide inventory と簡易 route setup を順次実装し、G7 を閉じる前に Deferred CI を補完する。
+orchestrator が dispatch 17 artifact `9ffc51d` のコード、static/unit evidence、non-destructive local CI設計をreviewする。blocking defectがなければ、利用者判断に従いDeferred CIをbacklogに保持してDEV-061のhost-wide inventoryと簡易route setupへ進む。G7を閉じる前にDeferred CIを補完する。
 
 ## Blocking items
 
