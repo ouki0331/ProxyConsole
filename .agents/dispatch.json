@@ -1,19 +1,19 @@
 {
   "protocol_version": 1,
-  "dispatch_id": 17,
-  "issued_at": "2026-11-24T23:54:44+09:00",
+  "dispatch_id": 18,
+  "issued_at": "2026-11-25T00:25:00+09:00",
   "issued_by": "orchestrator",
   "recipient": "implementer",
-  "command": "address_review_and_requirement_change",
-  "task_id": "DEV-060",
-  "task_file": "docs/tasks/DEV-060.md",
-  "base_commit": "00f23c1",
+  "command": "execute_task",
+  "task_id": "DEV-061",
+  "task_file": "docs/tasks/DEV-061.md",
+  "base_commit": "491aae5",
   "previous_task": {
     "task_id": "DEV-060",
-    "decision": "blocked_by_missing_container_runtime_and_replanned",
-    "review_file": "docs/reviews/DEV-060-review-001.md"
+    "decision": "approved_with_deferred_ci",
+    "review_file": "docs/reviews/DEV-060-review-002.md"
   },
-  "required_action": "Pull origin/main, acknowledge dispatch 17, read docs/product/PRODUCT_MAP.md, docs/tasks/DEV-060.md, and docs/reviews/DEV-060-review-001.md. Implement the Docker/Podman runtime adapter, provider-neutral Engine socket handling, runtime-neutral scripts/tests, and make ci-local without starting DEV-061 host-wide inventory or route UI redesign. Run static checks and each available local runtime CI exactly once per completed phase, record unavailable runtime evidence without claiming success, push, then wait for review.",
+  "required_action": "Pull origin/main, acknowledge dispatch 18, read docs/development/PLAN.md, docs/product/PRODUCT_MAP.md, docs/tasks/DEV-061.md, and docs/reviews/DEV-060-review-002.md. Implement host-wide Docker/Podman inventory, Runtime Projects with Alt+6, quick route setup with progressive advanced fields, and demo profile separation without adding logs or container lifecycle mutation. Run static/unit/browser checks and one available-runtime local CI at phase completion; if environment or permissions prevent CI, record Deferred CI without claiming success and continue. Push each meaningful checkpoint, then wait for review.",
   "state": "assigned"
 }
 

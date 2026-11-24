@@ -3,14 +3,14 @@
 Updated: 2026-11-24
 Phase: P7
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 deferred / G7 pending
-Active task: DEV-060
-Task status: Ready for review
-Owner: orchestrator
-Last verified commit: `8a84edc` (DEV-042 approved by independent review 002; Review 001 findings fixed and all 12 suites verified)
+Active task: DEV-061
+Task status: In progress
+Owner: implementer
+Last verified commit: `491aae5` (DEV-060 review 002 approved; static/runtime unit evidence passed, Docker/Podman integration CI deferred by environment)
 Last substantive remote progress: `9ffc51d` (Docker / Podman runtime adapter, provider-neutral socket, runtime-neutral tests, and local CI entrypoint implemented)
-Task definition baseline: `d290465`
-Dispatched at: 2026-11-24 23:54 JST
-Mailbox dispatch: `17` (`.agents/dispatch.json`)
+Task definition baseline: `491aae5`
+Dispatched at: 2026-11-25 00:25 JST
+Mailbox dispatch: `18` (`.agents/dispatch.json`)
 
 ## Current summary
 
@@ -33,15 +33,17 @@ Mailbox dispatch: `17` (`.agents/dispatch.json`)
 - DEV-060 の日英UI、Overview、Navigation 実装は実装 Agent の全13 suite で成功したが、独立 review 環境に container runtime がなく review 001 は `Blocked` となった。
 - 利用者判断により Docker / Podman 両対応と local CI を製品前提へ追加し、dispatch 17 で DEV-060 review remediation を開始した。
 - dispatch 17 のruntime互換実装、static check、runtime unit testは成功した。Podman / Docker local CIは実行環境にruntimeがないためDeferred CIとして残し、`Ready for review` とした。
+- DEV-060 review 002はblocking findingなしでApprovedとなり、`Done`とした。Deferred CIはG7完了前のbacklogに残した。
+- DEV-061を開始し、host-wide inventory、Runtime Projects、簡易route setup、demo profile分離をdispatch 18で割り当てた。
 
 ## Next transition
 
-orchestrator が dispatch 17 artifact `9ffc51d` のコード、static/unit evidence、non-destructive local CI設計をreviewする。blocking defectがなければ、利用者判断に従いDeferred CIをbacklogに保持してDEV-061のhost-wide inventoryと簡易route setupへ進む。G7を閉じる前にDeferred CIを補完する。
+実装AgentがDEV-061に従い、host-wide inventory、Runtime Projects workspace、quick route / advanced disclosure、demo profile分離を順次実装する。phase完了時に利用可能なruntimeでlocal CIを一回実行し、環境制約時はDeferred CIとして記録してDEV-062へ進む。
 
 ## Blocking items
 
 - 現在の orchestrator 環境には `docker` / `podman` command がない。runtime compatibility 実装後の local CI は各 runtime を利用できるローカル実行環境で行い、未実行側を成功扱いにしない。
-- Runtime Projects / Logs は DEV-060 合格後に DEV-061 / DEV-062 として順次詳細化する。
+- LogsはDEV-061合格後にDEV-062として実装する。
 
 ## Verification backlog
 

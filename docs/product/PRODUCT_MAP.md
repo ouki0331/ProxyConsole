@@ -38,9 +38,9 @@ ProxyConsole は、単一利用者が自分の WSL / Linux 上の Docker また�
 | Operate | Replay | `OPS-REPLAY-001` | request の編集・再送・cURL/fetch 出力 | Confirmed | Available |
 | Operate | Rules | `OPS-RULE-001` | 将来 request の自動変更ルール | Confirmed | Available |
 | Observe | Incidents | `OBS-NOTIFY-001` | 障害集約・復旧・live notification | Confirmed | Available |
-| Console | Localization | `CON-I18N-001` | 英語 / 日本語 UI と永続言語選択 | Implemented | Available (review pending) |
-| Console | Overview | `CON-DASH-001` | フォームを持たないローカル状態 Dashboard | Implemented | Available (review pending) |
-| Console | Navigation | `CON-NAV-001` | workspace tab と keyboard shortcut | Implemented | Available (review pending) |
+| Console | Localization | `CON-I18N-001` | 英語 / 日本語 UI と永続言語選択 | Confirmed | Available |
+| Console | Overview | `CON-DASH-001` | フォームを持たないローカル状態 Dashboard | Confirmed | Available |
+| Console | Navigation | `CON-NAV-001` | workspace tab と keyboard shortcut | Confirmed | Available (Alt+1〜5) |
 | Runtime | Project inventory | `RUN-PROJ-001` | Docker / Podman Compose project / container の稼働・停止・health 集約 | Confirmed | Partial |
 | Runtime | Logs | `RUN-LOG-001` | container / proxy / Nginx log の一覧・tail・filter | Confirmed | Partial |
 | Runtime | Local data | `RUN-DATA-001` | SQLite と DB container の状態サマリ | Confirmed | Partial |
