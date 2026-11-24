@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck disable=SC1091
-source "${ROOT_DIR}/scripts/container-runtime.sh"
+source "${ROOT_DIR}/scripts/test-runtime.sh"
 COMPOSE_FILE="${ROOT_DIR}/deploy/compose/docker-compose.yml"
 EDGE_HTTPS_PORT="${EDGE_HTTPS_PORT:-8443}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-18480}"
@@ -40,6 +40,16 @@ assert "storage" in data, data
 assert "incidents" in data, data
 assert "sqlite" in data, data
 print("    PASS: /api/v1/overview/summary returned all 8 categories")
+PY
+
+runtime_json="$(curl -fsS "${API_BASE}/api/v1/runtime/projects")"
+RUNTIME_JSON="${runtime_json}" python3 - <<'PY'
+import json, os
+data = json.loads(os.environ["RUNTIME_JSON"])
+assert data["provider"] in ("docker", "podman"), data
+assert "projects" in data and "summary" in data, data
+assert "database_containers" in data, data
+print("    PASS: /api/v1/runtime/projects returned host-wide inventory contract")
 PY
 
 # Now run Browser CDP E2E tests
@@ -268,6 +278,7 @@ try:
           requestsHidden: document.getElementById('requests-workspace')?.hidden,
           rulesHidden: document.getElementById('rules-workspace')?.hidden,
           notifHidden: document.getElementById('notifications-workspace')?.hidden,
+          runtimeHidden: document.getElementById('runtime-workspace')?.hidden,
           hasRouteFormInOverview: document.getElementById('overview-workspace')?.querySelector('form') !== null,
           hasRuleFormInOverview: document.getElementById('overview-workspace')?.querySelector('#rule-form') !== null,
           overviewPressed: document.getElementById('view-overview-btn')?.getAttribute('aria-pressed'),
@@ -280,6 +291,7 @@ try:
     assert state["requestsHidden"] is True, state
     assert state["rulesHidden"] is True, state
     assert state["notifHidden"] is True, state
+    assert state["runtimeHidden"] is True, state
     assert state["hasRouteFormInOverview"] is False, "Overview must not contain forms"
     assert state["hasRuleFormInOverview"] is False, "Overview must not contain rule form"
     assert state["overviewPressed"] == "true", state
@@ -321,6 +333,7 @@ try:
           routesBtnText: document.getElementById('view-routes-btn')?.textContent,
           requestsBtnText: document.getElementById('view-requests-btn')?.textContent,
           rulesBtnText: document.getElementById('view-rules-btn')?.textContent,
+          runtimeBtnText: document.getElementById('view-runtime-btn')?.textContent,
           savedLocale: localStorage.getItem('proxyconsole_locale'),
         };
         """
@@ -332,6 +345,7 @@ try:
     assert "ルートとコンテナ" in ja_state["routesBtnText"], ja_state
     assert "リクエストと再送" in ja_state["requestsBtnText"], ja_state
     assert "変更ルール" in ja_state["rulesBtnText"], ja_state
+    assert "実行中プロジェクト" in ja_state["runtimeBtnText"], ja_state
     assert ja_state["savedLocale"] == "ja", ja_state
     print("       PASS: Switched to Japanese successfully")
 
@@ -353,8 +367,8 @@ try:
     assert en_state["savedLocale"] == "en", en_state
     print("       PASS: Switched back to English successfully")
 
-    # 4. Keyboard Shortcuts: Alt+1..5 (AC-9, AC-10)
-    print("    -> [Test 4] Verifying Alt+1..5 shortcuts and active state")
+    # 4. Keyboard Shortcuts: Alt+1..6 (AC-9, AC-10)
+    print("    -> [Test 4] Verifying Alt+1..6 shortcuts and active state")
     # Press Alt+2 for Routes
     cdp.eval_js(
         """
@@ -430,6 +444,24 @@ try:
     assert ws_notif["notifHidden"] is False, ws_notif
     assert ws_notif["notifPressed"] == "true", ws_notif
     print("       PASS: Alt+5 navigated to Notifications")
+
+    # Press Alt+6 for Runtime Projects
+    cdp.eval_js(
+        """
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '6', altKey: true, bubbles: true }));
+        """
+    )
+    ws_runtime = cdp.eval_js(
+        """
+        return {
+          runtimeHidden: document.getElementById('runtime-workspace')?.hidden,
+          runtimePressed: document.getElementById('view-runtime-btn')?.getAttribute('aria-pressed'),
+        };
+        """
+    )
+    assert ws_runtime["runtimeHidden"] is False, ws_runtime
+    assert ws_runtime["runtimePressed"] == "true", ws_runtime
+    print("       PASS: Alt+6 navigated to Runtime Projects")
 
     # Press Alt+1 to return to Overview
     cdp.eval_js(

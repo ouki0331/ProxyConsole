@@ -19,8 +19,8 @@
       <button type="button" id="view-overview-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="true" data-workspace="overview" title="Overview (Alt+1)">
         <span data-i18n="nav.overview">Overview</span> <kbd class="kbd-hint">Alt+1</kbd>
       </button>
-      <button type="button" id="view-routes-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="routes" title="Routes &amp; Docker (Alt+2)">
-        <span data-i18n="nav.routes">Routes &amp; Docker</span> <kbd class="kbd-hint">Alt+2</kbd>
+      <button type="button" id="view-routes-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="routes" title="Routes &amp; Containers (Alt+2)">
+        <span data-i18n="nav.routes">Routes &amp; Containers</span> <kbd class="kbd-hint">Alt+2</kbd>
       </button>
       <button type="button" id="view-requests-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="requests" title="Requests &amp; Replay (Alt+3)">
         <span data-i18n="nav.requests">Requests &amp; Replay</span> <kbd class="kbd-hint">Alt+3</kbd>
@@ -30,6 +30,9 @@
       </button>
       <button type="button" id="view-notifications-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="notifications" title="Notifications (Alt+5)">
         <span data-i18n="nav.notifications">Notifications</span> <span id="notifications-nav-badge" class="badge badge-neutral">0</span> <kbd class="kbd-hint">Alt+5</kbd>
+      </button>
+      <button type="button" id="view-runtime-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="runtime" title="Runtime Projects (Alt+6)">
+        <span data-i18n="nav.runtime">Runtime Projects</span> <kbd class="kbd-hint">Alt+6</kbd>
       </button>
     </nav>
     <div class="header-actions">
@@ -116,7 +119,7 @@
             <p class="metric-description" id="overview-docker-desc"><span id="overview-docker-stopped-count">0</span> stopped containers discovered.</p>
           </div>
           <div class="overview-card-footer">
-            <button type="button" class="btn-link overview-deep-link" data-target-workspace="routes" data-target-scroll="docker-discovery-section" data-i18n="overview.view_docker_deep">View Containers &rarr;</button>
+            <button type="button" class="btn-link overview-deep-link" data-target-workspace="runtime" data-i18n="overview.view_docker_deep">View Containers &rarr;</button>
           </div>
         </section>
 
@@ -2305,6 +2308,111 @@
           </section>
         </div>
       </div>
+    </div>
+
+    <!-- DEV-061: Host-wide Runtime Projects Workspace -->
+    <div id="runtime-workspace" class="console-workspace" hidden>
+      <section class="card runtime-hero" aria-labelledby="runtime-workspace-heading">
+        <div class="card-header">
+          <div>
+            <h2 id="runtime-workspace-heading" data-i18n="runtime.heading">Runtime Projects &amp; Containers</h2>
+            <p class="card-subtitle" data-i18n="runtime.subtitle">Host-wide read-only inventory from the selected Container Engine.</p>
+          </div>
+          <div class="discovery-controls">
+            <span id="runtime-provider-badge" class="badge badge-neutral">-</span>
+            <span id="runtime-summary-badge" class="badge badge-outline">0 containers</span>
+            <button type="button" id="runtime-refresh-btn" class="btn btn-secondary" data-i18n="runtime.refresh">Refresh Inventory</button>
+          </div>
+        </div>
+        <div class="runtime-filters">
+          <label for="runtime-search-input" class="visually-hidden" data-i18n="runtime.search">Search projects, services, containers, or images</label>
+          <input type="search" id="runtime-search-input" data-i18n-placeholder="runtime.search" placeholder="Search projects, services, containers, or images">
+          <label for="runtime-state-filter" class="visually-hidden">Container state</label>
+          <select id="runtime-state-filter">
+            <option value="all" data-i18n="runtime.all_states">All states</option>
+            <option value="running" data-i18n="runtime.running">Running</option>
+            <option value="stopped" data-i18n="runtime.stopped">Stopped</option>
+          </select>
+        </div>
+        <div id="runtime-error-box" class="discovery-error-box" role="alert" hidden>
+          <strong data-i18n="runtime.unavailable">Inventory unavailable</strong>
+          <span id="runtime-error-message"></span>
+        </div>
+      </section>
+
+      <section id="runtime-database-summary" class="card" aria-labelledby="runtime-database-heading">
+        <div class="card-header">
+          <div>
+            <h2 id="runtime-database-heading">Local Data Services</h2>
+            <p class="card-subtitle">ProxyConsole SQLite health is shown in Overview. Database-like containers discovered on this Engine are summarized here.</p>
+          </div>
+          <span id="runtime-database-count" class="badge badge-outline">0</span>
+        </div>
+        <div id="runtime-database-list" class="runtime-database-list"></div>
+      </section>
+
+      <div id="runtime-empty-state" class="empty-state" hidden>
+        <p data-i18n="runtime.empty">No containers match the current filters.</p>
+      </div>
+      <div id="runtime-projects-list" class="runtime-projects-list"></div>
+
+      <section id="quick-route-panel" class="card quick-route-panel" aria-labelledby="quick-route-heading" hidden>
+        <div class="card-header">
+          <div>
+            <h2 id="quick-route-heading" data-i18n="runtime.route_heading">Quick Route Setup</h2>
+            <p class="card-subtitle"><span data-i18n="runtime.selected_target">Selected target</span>: <code id="quick-route-target-summary">-</code></p>
+          </div>
+          <button type="button" id="quick-route-close-btn" class="btn btn-secondary" data-i18n="common.close">Close</button>
+        </div>
+        <form id="quick-route-form" novalidate>
+          <input type="hidden" id="quick-route-target-id">
+          <div class="form-group">
+            <label for="quick-route-domain"><span data-i18n="runtime.domain">Domain</span> <span class="required-mark">*</span></label>
+            <input type="text" id="quick-route-domain" required autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="api.local.test">
+            <span id="quick-route-domain-error" class="field-error" role="alert"></span>
+          </div>
+          <p id="quick-route-preview" class="routing-preview"></p>
+          <details class="quick-route-advanced">
+            <summary data-i18n="runtime.advanced">Advanced settings</summary>
+            <div class="form-group">
+              <label for="quick-route-mode">Target mode</label>
+              <select id="quick-route-mode">
+                <option value="detected">Selected container</option>
+                <option value="manual">Manual host / port</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="quick-route-id">Route ID</label>
+              <input type="text" id="quick-route-id" placeholder="Auto-generated">
+            </div>
+            <div class="form-group">
+              <label for="quick-route-scheme">Scheme</label>
+              <select id="quick-route-scheme"><option value="http">http</option><option value="https">https</option></select>
+            </div>
+            <div id="quick-route-manual-fields" hidden>
+              <div class="form-group">
+                <label for="quick-route-host">Upstream host / IP</label>
+                <input type="text" id="quick-route-host" placeholder="service-name or 127.0.0.1">
+              </div>
+              <div class="form-group">
+                <label for="quick-route-port">Upstream port</label>
+                <input type="number" id="quick-route-port" min="1" max="65535" placeholder="8080">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="quick-route-description">Description</label>
+              <input type="text" id="quick-route-description">
+            </div>
+            <label class="checkbox-inline" for="quick-route-enabled">
+              <input type="checkbox" id="quick-route-enabled" checked>
+              <span data-i18n="common.enabled">Enabled</span>
+            </label>
+          </details>
+          <div class="form-actions">
+            <button type="submit" id="quick-route-submit-btn" class="btn btn-primary" data-i18n="runtime.save_route">Save &amp; Apply Route</button>
+          </div>
+        </form>
+      </section>
     </div>
   </main>
 

@@ -676,6 +676,9 @@ class CaptureIndexStore:
                 "SELECT seeded FROM route_apply_state WHERE id = 1"
             ).fetchone()
             if st_row is not None and int(st_row["seeded"]) == 0:
+                demo_mode = os.environ.get(
+                    "PROXYCONSOLE_DEMO_MODE", "false"
+                ).strip().lower() in ("1", "true", "yes", "on")
                 seed_routes = [
                     (
                         "route:app-a",
@@ -702,17 +705,18 @@ class CaptureIndexStore:
                         now_iso,
                     ),
                 ]
-                conn.executemany(
-                    """
-                    INSERT INTO routes (
-                        route_id, domain, upstream_scheme, upstream_host,
-                        upstream_port, enabled, copied_from_route_id,
-                        description, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(route_id) DO NOTHING
-                    """,
-                    seed_routes,
-                )
+                if demo_mode:
+                    conn.executemany(
+                        """
+                        INSERT INTO routes (
+                            route_id, domain, upstream_scheme, upstream_host,
+                            upstream_port, enabled, copied_from_route_id,
+                            description, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(route_id) DO NOTHING
+                        """,
+                        seed_routes,
+                    )
                 conn.execute(
                     "UPDATE route_apply_state SET seeded = 1 WHERE id = 1"
                 )

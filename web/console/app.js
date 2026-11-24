@@ -21,6 +21,7 @@ const I18N_CATALOG = {
       requests: "Requests & Replay",
       rules: "Modification Rules",
       notifications: "Notifications",
+      runtime: "Runtime Projects",
       all: "All Workspaces",
     },
     common: {
@@ -177,15 +178,32 @@ const I18N_CATALOG = {
       empty_incidents: "No active incidents currently reported.",
       toast_heading: "Recent Alerts",
     },
+    runtime: {
+      heading: "Runtime Projects & Containers",
+      subtitle: "Host-wide read-only inventory from the selected Container Engine.",
+      refresh: "Refresh Inventory",
+      search: "Search projects, services, containers, or images",
+      all_states: "All states",
+      running: "Running",
+      stopped: "Stopped",
+      empty: "No containers match the current filters.",
+      quick_route: "Create Route",
+      unavailable: "Inventory unavailable",
+      advanced: "Advanced settings",
+      route_heading: "Quick Route Setup",
+      selected_target: "Selected target",
+      domain: "Domain",
+      save_route: "Save & Apply Route",
+    },
   },
   ja: {
     app: {
       title: "ProxyConsole — ルートとコンテナターゲット管理",
       heading: "ProxyConsole",
-      subtitle: "ローカル開発用 ルーティング・Dockerターゲット・リクエスト監視・再送コンソール",
+      subtitle: "ローカル開発用 ルーティング・コンテナターゲット・リクエスト監視・再送コンソール",
     },
     header: {
-      subtitle: "ローカル開発用 ルーティング・Dockerターゲット・リクエスト監視・再送コンソール",
+      subtitle: "ローカル開発用 ルーティング・コンテナターゲット・リクエスト監視・再送コンソール",
     },
     nav: {
       overview: "概要",
@@ -193,6 +211,7 @@ const I18N_CATALOG = {
       requests: "リクエストと再送",
       rules: "変更ルール",
       notifications: "通知",
+      runtime: "実行中プロジェクト",
       all: "全ワークスペース",
     },
     common: {
@@ -225,7 +244,7 @@ const I18N_CATALOG = {
     },
     feedback: {
       ready_title: "準備完了",
-      ready_msg: "ローカル制御APIからルートおよびDocker検出状態を読み込みました。",
+      ready_msg: "ローカル制御APIからルートおよびコンテナエンジンの検出状態を読み込みました。",
     },
     status: {
       healthy: "正常",
@@ -248,7 +267,7 @@ const I18N_CATALOG = {
     },
     overview: {
       heading: "システム概要",
-      subtitle: "プロキシルーティング、Dockerサービス、キャプチャ活動、ストレージ、障害通知のフォームなし集約ダッシュボード。",
+      subtitle: "プロキシルーティング、コンテナサービス、キャプチャ活動、ストレージ、障害通知のフォームなし集約ダッシュボード。",
       last_refresh: "最終更新:",
       card_health_title: "プロキシ・制御API健全性",
       health_desc: "TLS Edge、Mitmproxy Inspector、Nginx Router、Control API はすべて応答しています。",
@@ -349,6 +368,23 @@ const I18N_CATALOG = {
       empty_incidents: "現在アクティブなインシデントはありません。",
       toast_heading: "最新のアラート",
     },
+    runtime: {
+      heading: "実行中プロジェクト・コンテナ",
+      subtitle: "選択中のコンテナエンジンから取得したhost全体の読取専用inventoryです。",
+      refresh: "一覧を更新",
+      search: "プロジェクト・サービス・コンテナ・imageを検索",
+      all_states: "すべての状態",
+      running: "稼働中",
+      stopped: "停止中",
+      empty: "現在の条件に一致するコンテナはありません。",
+      quick_route: "ルートを作成",
+      unavailable: "一覧を取得できません",
+      advanced: "詳細設定",
+      route_heading: "簡易ルート設定",
+      selected_target: "選択したターゲット",
+      domain: "ドメイン",
+      save_route: "保存してルートへ適用",
+    },
   },
 };
 
@@ -432,6 +468,9 @@ function applyTranslations(lang) {
   if (appState.workspaceView === "overview" && appState.overviewSummary) {
     renderOverviewSummary(appState.overviewSummary);
   }
+  if (appState.runtimeInventory) {
+    renderRuntimeInventory();
+  }
 }
 
 function setLanguage(lang) {
@@ -476,6 +515,8 @@ const appState = {
   discoveryError: null,
   containers: [],
   targets: [],
+  runtimeInventory: null,
+  runtimeQuickTarget: null,
   copySourceRoute: null,
   deleteTargetRoute: null,
   pendingOps: 0,
@@ -1710,11 +1751,13 @@ const viewRoutesBtn = document.getElementById("view-routes-btn");
 const viewRequestsBtn = document.getElementById("view-requests-btn");
 const viewRulesBtn = document.getElementById("view-rules-btn");
 const viewNotificationsBtn = document.getElementById("view-notifications-btn");
+const viewRuntimeBtn = document.getElementById("view-runtime-btn");
 const overviewWorkspace = document.getElementById("overview-workspace");
 const routesWorkspace = document.getElementById("routes-workspace");
 const requestsWorkspace = document.getElementById("requests-workspace");
 const rulesWorkspace = document.getElementById("rules-workspace");
 const notificationsWorkspace = document.getElementById("notifications-workspace");
+const runtimeWorkspace = document.getElementById("runtime-workspace");
 
 const capturesTotalBadge = document.getElementById("captures-total-badge");
 const refreshCapturesBtn = document.getElementById("refresh-captures-btn");
@@ -1887,6 +1930,7 @@ function setWorkspaceView(mode) {
     "requests",
     "rules",
     "notifications",
+    "runtime",
     "all",
   ];
   if (!validModes.includes(mode)) {
@@ -1914,6 +1958,9 @@ function setWorkspaceView(mode) {
       String(mode === "notifications")
     );
   }
+  if (viewRuntimeBtn) {
+    viewRuntimeBtn.setAttribute("aria-pressed", String(mode === "runtime"));
+  }
 
   if (overviewWorkspace) {
     overviewWorkspace.hidden = mode !== "all" && mode !== "overview";
@@ -1931,9 +1978,15 @@ function setWorkspaceView(mode) {
     notificationsWorkspace.hidden =
       mode !== "all" && mode !== "notifications";
   }
+  if (runtimeWorkspace) {
+    runtimeWorkspace.hidden = mode !== "all" && mode !== "runtime";
+  }
 
   if (mode === "overview" || mode === "all") {
     refreshOverview();
+  }
+  if (mode === "runtime" || mode === "all") {
+    loadRuntimeInventory();
   }
 }
 
@@ -1950,6 +2003,7 @@ function initWorkspace() {
     "requests",
     "rules",
     "notifications",
+    "runtime",
     "all",
   ];
   if (saved && validModes.includes(saved)) {
@@ -1978,6 +2032,9 @@ if (viewNotificationsBtn) {
   viewNotificationsBtn.addEventListener("click", () =>
     setWorkspaceView("notifications")
   );
+}
+if (viewRuntimeBtn) {
+  viewRuntimeBtn.addEventListener("click", () => setWorkspaceView("runtime"));
 }
 
 // Overview Dashboard Logic
@@ -2204,7 +2261,7 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// Keyboard Shortcuts: Alt+1..5
+// Keyboard Shortcuts: Alt+1..6
 window.addEventListener("keydown", (e) => {
   if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
     return;
@@ -2232,6 +2289,7 @@ window.addEventListener("keydown", (e) => {
     "3": "requests",
     "4": "rules",
     "5": "notifications",
+    "6": "runtime",
   };
 
   const targetMode = map[e.key];
@@ -2244,6 +2302,361 @@ window.addEventListener("keydown", (e) => {
     }
   }
 });
+
+// ================================================================
+// DEV-061: Host-wide Runtime Projects & Quick Route Setup
+// ================================================================
+const runtimeProviderBadge = document.getElementById("runtime-provider-badge");
+const runtimeSummaryBadge = document.getElementById("runtime-summary-badge");
+const runtimeRefreshBtn = document.getElementById("runtime-refresh-btn");
+const runtimeSearchInput = document.getElementById("runtime-search-input");
+const runtimeStateFilter = document.getElementById("runtime-state-filter");
+const runtimeErrorBox = document.getElementById("runtime-error-box");
+const runtimeErrorMessage = document.getElementById("runtime-error-message");
+const runtimeEmptyState = document.getElementById("runtime-empty-state");
+const runtimeProjectsList = document.getElementById("runtime-projects-list");
+const runtimeDatabaseCount = document.getElementById("runtime-database-count");
+const runtimeDatabaseList = document.getElementById("runtime-database-list");
+const quickRoutePanel = document.getElementById("quick-route-panel");
+const quickRouteForm = document.getElementById("quick-route-form");
+const quickRouteTargetId = document.getElementById("quick-route-target-id");
+const quickRouteTargetSummary = document.getElementById(
+  "quick-route-target-summary"
+);
+const quickRouteDomain = document.getElementById("quick-route-domain");
+const quickRouteDomainError = document.getElementById(
+  "quick-route-domain-error"
+);
+const quickRoutePreview = document.getElementById("quick-route-preview");
+const quickRouteId = document.getElementById("quick-route-id");
+const quickRouteMode = document.getElementById("quick-route-mode");
+const quickRouteScheme = document.getElementById("quick-route-scheme");
+const quickRouteManualFields = document.getElementById(
+  "quick-route-manual-fields"
+);
+const quickRouteHost = document.getElementById("quick-route-host");
+const quickRoutePort = document.getElementById("quick-route-port");
+const quickRouteDescription = document.getElementById(
+  "quick-route-description"
+);
+const quickRouteEnabled = document.getElementById("quick-route-enabled");
+const quickRouteSubmitBtn = document.getElementById("quick-route-submit-btn");
+const quickRouteCloseBtn = document.getElementById("quick-route-close-btn");
+
+function reachabilityLabel(reason) {
+  const labels = {
+    shared_router_network: "Shared router network",
+    published_host_port: "Published host port",
+    published_loopback_only: "Published on host loopback only",
+    network_attachment_required: "Network attachment required",
+    stopped: "Container stopped",
+    no_tcp_port: "No TCP port",
+  };
+  return labels[reason] || reason || "Unavailable";
+}
+
+function renderRuntimeDatabaseSummary(items) {
+  if (!runtimeDatabaseList || !runtimeDatabaseCount) return;
+  runtimeDatabaseList.textContent = "";
+  runtimeDatabaseCount.textContent = String(items.length);
+  if (items.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "text-muted";
+    empty.textContent = "No database-like containers detected.";
+    runtimeDatabaseList.appendChild(empty);
+    return;
+  }
+  for (const item of items) {
+    const chip = document.createElement("span");
+    chip.className = "runtime-db-chip";
+    chip.textContent = `${item.project} / ${item.service_name} · ${item.state} · ${item.health}`;
+    runtimeDatabaseList.appendChild(chip);
+  }
+}
+
+function renderRuntimeInventory() {
+  if (!runtimeProjectsList) return;
+  const data = appState.runtimeInventory;
+  runtimeProjectsList.textContent = "";
+  if (!data) return;
+
+  if (runtimeProviderBadge) {
+    runtimeProviderBadge.textContent = data.provider || "-";
+    runtimeProviderBadge.className = `badge ${
+      data.available ? "badge-success" : "badge-danger"
+    }`;
+  }
+  if (runtimeSummaryBadge) {
+    const summary = data.summary || {};
+    runtimeSummaryBadge.textContent = `${summary.running || 0} running / ${
+      summary.containers || 0
+    } containers`;
+  }
+  if (runtimeErrorBox && runtimeErrorMessage) {
+    runtimeErrorBox.hidden = Boolean(data.available);
+    runtimeErrorMessage.textContent = data.error || "";
+  }
+  renderRuntimeDatabaseSummary(data.database_containers || []);
+
+  const query = (runtimeSearchInput?.value || "").trim().toLowerCase();
+  const stateFilter = runtimeStateFilter?.value || "all";
+  let renderedContainers = 0;
+
+  for (const project of data.projects || []) {
+    const containers = (project.containers || []).filter((container) => {
+      if (stateFilter !== "all" && container.state !== stateFilter) return false;
+      if (!query) return true;
+      const haystack = [
+        project.name,
+        container.service_name,
+        container.container_name,
+        container.image,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+    if (containers.length === 0) continue;
+    renderedContainers += containers.length;
+
+    const projectCard = document.createElement("section");
+    projectCard.className = "card runtime-project-card";
+    projectCard.dataset.projectId = project.project_id;
+    const header = document.createElement("div");
+    header.className = "runtime-project-header";
+    const title = document.createElement("h3");
+    title.textContent = project.name;
+    const scopeBadge = document.createElement("span");
+    scopeBadge.className = "badge badge-outline";
+    scopeBadge.textContent = `${project.scope} · ${containers.length}`;
+    header.append(title, scopeBadge);
+    projectCard.appendChild(header);
+
+    const list = document.createElement("div");
+    list.className = "runtime-container-list";
+    for (const container of containers) {
+      const row = document.createElement("article");
+      row.className = "runtime-container-row";
+      row.dataset.inventoryId = container.inventory_id;
+
+      const identity = document.createElement("div");
+      identity.className = "runtime-container-identity";
+      const name = document.createElement("strong");
+      name.textContent = container.service_name || container.container_name;
+      const meta = document.createElement("span");
+      meta.className = "cell-meta";
+      meta.textContent = `${container.container_name} · ${container.image} · ${container.container_short_id}`;
+      identity.append(name, meta);
+
+      const states = document.createElement("div");
+      states.className = "runtime-container-states";
+      const stateBadge = document.createElement("span");
+      stateBadge.className = `badge ${
+        container.running ? "badge-success" : "badge-danger"
+      }`;
+      stateBadge.textContent = container.state;
+      const healthBadge = document.createElement("span");
+      healthBadge.className = `badge ${
+        container.health === "healthy"
+          ? "badge-success"
+          : container.health === "unhealthy"
+            ? "badge-danger"
+            : "badge-neutral"
+      }`;
+      healthBadge.textContent = `health: ${container.health}`;
+      states.append(stateBadge, healthBadge);
+
+      const ports = document.createElement("div");
+      ports.className = "runtime-port-actions";
+      if (!container.ports || container.ports.length === 0) {
+        const noPort = document.createElement("span");
+        noPort.className = "text-muted";
+        noPort.textContent = reachabilityLabel("no_tcp_port");
+        ports.appendChild(noPort);
+      } else {
+        for (const port of container.ports) {
+          const action = document.createElement("button");
+          action.type = "button";
+          action.className = "btn btn-sm btn-secondary runtime-route-btn";
+          action.disabled = !port.selectable;
+          action.textContent = port.selectable
+            ? `${port.internal_port}/tcp · ${t("runtime.quick_route")}`
+            : `${port.internal_port}/tcp · ${reachabilityLabel(port.reachability)}`;
+          action.title = reachabilityLabel(port.reachability);
+          if (port.selectable) {
+            action.addEventListener("click", () =>
+              openQuickRoute(container, port)
+            );
+          }
+          ports.appendChild(action);
+        }
+      }
+
+      row.append(identity, states, ports);
+      list.appendChild(row);
+    }
+    projectCard.appendChild(list);
+    runtimeProjectsList.appendChild(projectCard);
+  }
+
+  if (runtimeEmptyState) {
+    runtimeEmptyState.hidden = renderedContainers !== 0;
+  }
+}
+
+async function loadRuntimeInventory() {
+  if (!runtimeRefreshBtn) return;
+  runtimeRefreshBtn.disabled = true;
+  try {
+    const data = await apiRequest("/api/v1/runtime/projects");
+    appState.runtimeInventory = data;
+    renderRuntimeInventory();
+  } catch (err) {
+    appState.runtimeInventory = {
+      available: false,
+      provider: "-",
+      error: err.message,
+      summary: {},
+      projects: [],
+      database_containers: [],
+    };
+    renderRuntimeInventory();
+  } finally {
+    runtimeRefreshBtn.disabled = false;
+  }
+}
+
+function updateQuickRoutePreview() {
+  if (!quickRoutePreview) return;
+  const target = appState.runtimeQuickTarget;
+  const domain = (quickRouteDomain?.value || "").trim().toLowerCase();
+  const manual = quickRouteMode?.value === "manual";
+  const upstream = manual
+    ? `${quickRouteScheme?.value || "http"}://${
+        quickRouteHost?.value.trim() || "<host>"
+      }:${quickRoutePort?.value || "<port>"}`
+    : target?.upstream_url;
+  quickRoutePreview.textContent = target
+    ? `${domain || "<domain>"} → ${upstream}`
+    : "";
+}
+
+function openQuickRoute(container, port) {
+  appState.runtimeQuickTarget = { ...port, container };
+  quickRouteTargetId.value = port.target_id;
+  quickRouteTargetSummary.textContent = `${container.compose_project || "standalone"} / ${
+    container.service_name
+  } · ${port.internal_port}/tcp · ${reachabilityLabel(port.reachability)}`;
+  quickRouteDomain.value = "";
+  quickRouteId.value = "";
+  quickRouteMode.value = "detected";
+  quickRouteScheme.value = port.upstream_scheme || "http";
+  quickRouteHost.value = "";
+  quickRoutePort.value = "";
+  quickRouteManualFields.hidden = true;
+  quickRouteDescription.value = "";
+  quickRouteEnabled.checked = true;
+  clearFieldError(quickRouteDomain, quickRouteDomainError);
+  updateQuickRoutePreview();
+  quickRoutePanel.hidden = false;
+  quickRoutePanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  quickRouteDomain.focus();
+}
+
+function closeQuickRoute() {
+  appState.runtimeQuickTarget = null;
+  quickRouteForm?.reset();
+  if (quickRoutePanel) quickRoutePanel.hidden = true;
+}
+
+async function handleQuickRouteSubmit(event) {
+  event.preventDefault();
+  const target = appState.runtimeQuickTarget;
+  if (!target) return;
+  const domain = quickRouteDomain.value.trim().toLowerCase();
+  if (!DOMAIN_RE.test(domain)) {
+    setFieldError(
+      quickRouteDomain,
+      quickRouteDomainError,
+      "Enter a valid lowercase hostname such as api.local.test."
+    );
+    return;
+  }
+  clearFieldError(quickRouteDomain, quickRouteDomainError);
+  quickRouteSubmitBtn.disabled = true;
+  try {
+    const manual = quickRouteMode.value === "manual";
+    const manualPort = Number(quickRoutePort.value);
+    if (
+      manual &&
+      (!HOST_RE.test(quickRouteHost.value.trim()) ||
+        !Number.isInteger(manualPort) ||
+        manualPort < 1 ||
+        manualPort > 65535)
+    ) {
+      throw new Error("Enter a valid manual upstream host and port (1-65535). ");
+    }
+    const endpoint = manual
+      ? "/api/v1/routes"
+      : "/api/v1/routes/from-target";
+    const payload = {
+      domain,
+      upstream_scheme: quickRouteScheme.value,
+      route_id: quickRouteId.value.trim() || null,
+      description: quickRouteDescription.value.trim(),
+      enabled: quickRouteEnabled.checked,
+    };
+    if (manual) {
+      payload.upstream_host = quickRouteHost.value.trim();
+      payload.upstream_port = manualPort;
+    } else {
+      payload.target_id = target.target_id;
+      payload.target_scope = "all";
+    }
+    const result = await apiRequest(endpoint, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const applied = result.apply_result?.applied !== false;
+    const savedUpstream = manual
+      ? `${quickRouteScheme.value}://${quickRouteHost.value.trim()}:${manualPort}`
+      : target.upstream_url;
+    setFeedback(
+      applied ? "success" : "error",
+      applied ? "Route Applied" : "Route Saved, Apply Failed",
+      `${domain} → ${savedUpstream}`,
+      {
+        hint: applied
+          ? "The route is active. Existing atomic rollback protection remains enabled."
+          : result.apply_result?.last_error || "Review router apply status.",
+      }
+    );
+    closeQuickRoute();
+    await loadAllState({ refreshDiscovery: true, preserveBanner: true });
+    await loadRuntimeInventory();
+  } catch (err) {
+    setFieldError(quickRouteDomain, quickRouteDomainError, err.message);
+  } finally {
+    quickRouteSubmitBtn.disabled = false;
+  }
+}
+
+runtimeRefreshBtn?.addEventListener("click", loadRuntimeInventory);
+runtimeSearchInput?.addEventListener("input", renderRuntimeInventory);
+runtimeStateFilter?.addEventListener("change", renderRuntimeInventory);
+quickRouteDomain?.addEventListener("input", () => {
+  clearFieldError(quickRouteDomain, quickRouteDomainError);
+  updateQuickRoutePreview();
+});
+quickRouteMode?.addEventListener("change", () => {
+  quickRouteManualFields.hidden = quickRouteMode.value !== "manual";
+  updateQuickRoutePreview();
+});
+quickRouteScheme?.addEventListener("change", updateQuickRoutePreview);
+quickRouteHost?.addEventListener("input", updateQuickRoutePreview);
+quickRoutePort?.addEventListener("input", updateQuickRoutePreview);
+quickRouteForm?.addEventListener("submit", handleQuickRouteSubmit);
+quickRouteCloseBtn?.addEventListener("click", closeQuickRoute);
 
 function buildCapturesQueryString() {
   const params = new URLSearchParams();

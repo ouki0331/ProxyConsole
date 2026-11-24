@@ -97,6 +97,21 @@ class DiscoveryProviderTest(unittest.TestCase):
         self.assertEqual(target["upstream_host"], "host.containers.internal")
         self.assertEqual(target["upstream_port"], 18080)
         self.assertTrue(target["selectable"])
+        service._scan_docker = lambda **_: {  # type: ignore[method-assign]
+            "available": True,
+            "provider": "podman",
+            "refreshed_at": "2026-11-24T00:00:00+00:00",
+            "error": None,
+            "all_containers": [container],
+            "all_targets": targets,
+        }
+        resolved = service.resolve_target(target_id=target["target_id"], scope="all")
+        self.assertEqual(resolved["upstream_host"], "host.containers.internal")
+        self.assertEqual(resolved["upstream_port"], 18080)
+        self.assertEqual(
+            resolved["target_metadata"]["reachability"],
+            "published_host_port",
+        )
 
 
 if __name__ == "__main__":

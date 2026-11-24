@@ -61,6 +61,7 @@ services:
       DOCKER_SOCKET_PATH: /run/proxyconsole/engine.sock
       CONTAINER_ENGINE_PROVIDER: "${CONTAINER_ENGINE_PROVIDER:-docker}"
       COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-proxyconsole-dev001}"
+      PROXYCONSOLE_DEMO_MODE: "${PROXYCONSOLE_DEMO_MODE:-false}"
       REPLAY_EDGE_URL: https://edge:443
       REPLAY_CACERT: /etc/proxyconsole/certs/edge.crt
     command:
@@ -85,9 +86,6 @@ services:
       - "8080"
     volumes:
       - capture_data:/var/lib/proxyconsole
-    depends_on:
-      - echo-a
-      - echo-b
     extra_hosts:
       - "${CONTAINER_HOST_ALIAS:-host.docker.internal}:host-gateway"
     networks:
@@ -95,6 +93,7 @@ services:
       - router_targets_net
 
   echo-a:
+    profiles: ["demo", "test"]
     build:
       context: ../..
       dockerfile: tests/helpers/Dockerfile
@@ -108,6 +107,7 @@ services:
       - router_targets_net
 
   echo-b:
+    profiles: ["demo", "test"]
     build:
       context: ../..
       dockerfile: tests/helpers/Dockerfile

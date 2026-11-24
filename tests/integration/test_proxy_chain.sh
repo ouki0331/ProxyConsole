@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck disable=SC1091
-source "${ROOT_DIR}/scripts/container-runtime.sh"
+source "${ROOT_DIR}/scripts/test-runtime.sh"
 COMPOSE_FILE="${ROOT_DIR}/deploy/compose/docker-compose.yml"
 CERT_FILE="${ROOT_DIR}/var/certificates/edge.crt"
 

@@ -1416,6 +1416,121 @@ textarea:focus-visible,
   }
 }
 
+/* DEV-061 Runtime Projects */
+.runtime-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(150px, 220px);
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.runtime-projects-list {
+  display: grid;
+  gap: 1rem;
+  margin-block: 1rem;
+}
+
+.runtime-project-header,
+.runtime-container-row {
+  display: grid;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.runtime-project-header {
+  grid-template-columns: 1fr auto;
+  border-bottom: 1px solid var(--color-border, #dadce0);
+  padding-bottom: 0.75rem;
+}
+
+.runtime-project-header h3 {
+  margin: 0;
+}
+
+.runtime-container-list {
+  display: grid;
+}
+
+.runtime-container-row {
+  grid-template-columns: minmax(220px, 1fr) auto minmax(240px, auto);
+  padding-block: 0.85rem;
+  border-bottom: 1px solid #edf0f2;
+}
+
+.runtime-container-row:last-child {
+  border-bottom: 0;
+}
+
+.runtime-container-identity,
+.runtime-container-states,
+.runtime-port-actions,
+.runtime-database-list {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.runtime-container-identity {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.runtime-port-actions {
+  justify-content: flex-end;
+}
+
+.runtime-db-chip {
+  border: 1px solid #dadce0;
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.82rem;
+  background: #f8f9fa;
+}
+
+.quick-route-panel {
+  position: sticky;
+  bottom: 1rem;
+  z-index: 5;
+  box-shadow: 0 6px 24px rgba(60, 64, 67, 0.2);
+}
+
+.quick-route-advanced {
+  margin-block: 1rem;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.quick-route-advanced summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.routing-preview {
+  padding: 0.75rem;
+  border-radius: 6px;
+  background: #f1f3f4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .runtime-filters,
+  .runtime-container-row {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-port-actions {
+    justify-content: flex-start;
+  }
+
+  .quick-route-panel {
+    position: static;
+  }
+}
+
 
 
 

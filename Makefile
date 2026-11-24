@@ -14,7 +14,7 @@ config-test:
 
 runtime-test:
 	./tests/unit/test_container_runtime.sh
-	python3 -m unittest tests.unit.test_discovery_provider
+	python3 -m unittest tests.unit.test_discovery_provider tests.unit.test_demo_seed_mode
 
 test:
 	./tests/integration/test_proxy_chain.sh

@@ -501,6 +501,7 @@ class DockerDiscoveryService:
                     "upstream_host": route_host,
                     "upstream_port": route_port,
                     "upstream_url": f"http://{route_host}:{route_port}",
+                    "internal_port": p_num,
                     "protocol": proto,
                     "published_ports": p_info["published_ports"],
                     "networks": [n["network_name"] for n in networks_list],
