@@ -19,6 +19,7 @@ import time
 from typing import Any, Iterator
 
 from docker_discovery import DockerDiscoveryService
+from engine_logs import EngineLogsService
 from draft_replay import DraftReplayManager, decode_path_human_readable
 from parser import build_derived_views
 from retention import (
@@ -467,6 +468,7 @@ class CaptureIndexStore:
         self.retention = RetentionEngine(self)
         self.routes = RouteManager(self)
         self.discovery = DockerDiscoveryService(self)
+        self.logs = EngineLogsService(self.discovery)
         self.drafts = DraftReplayManager(self)
         self.rules = RuleEngineManager(self)
         self.notifications = NotificationEngineManager(self)

@@ -29,6 +29,11 @@ from draft_replay import (
     DraftValidationError,
     NonReplayableCaptureError,
 )
+from engine_logs import (
+    EngineLogSourceNotFoundError,
+    EngineLogsUnavailableError,
+    EngineLogsValidationError,
+)
 from index_store import CaptureIndexStore
 from notification_engine import (
     NotificationNotFoundError,
@@ -244,6 +249,39 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     200, self.store.discovery.get_runtime_projects()
                 )
+                return
+
+            if path == "/api/v1/runtime/logs":
+                try:
+                    self._send_json(
+                        200,
+                        self.store.logs.get_logs(
+                            container_id=_first_param(qs, "container_id"),
+                            tail=_first_param(qs, "tail"),
+                            since=_first_param(qs, "since"),
+                            severity=_first_param(qs, "severity"),
+                            search=_first_param(qs, "search"),
+                        ),
+                    )
+                except EngineLogSourceNotFoundError as exc:
+                    self._send_json(
+                        404,
+                        {
+                            "error": "log_source_not_found",
+                            "container_id": str(exc.args[0]),
+                            "message": f"Container {exc.args[0]!r} is not in runtime inventory",
+                        },
+                    )
+                except EngineLogsUnavailableError as exc:
+                    self._send_json(
+                        503,
+                        {"error": "engine_logs_unavailable", "message": str(exc)},
+                    )
+                except EngineLogsValidationError as exc:
+                    self._send_json(
+                        400,
+                        {"error": "invalid_log_filter", "message": str(exc)},
+                    )
                 return
 
             if path == "/api/v1/discovery/containers":
