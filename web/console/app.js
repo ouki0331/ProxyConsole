@@ -22,6 +22,7 @@ const I18N_CATALOG = {
       rules: "Modification Rules",
       notifications: "Notifications",
       runtime: "Runtime Projects",
+      logs: "Logs",
       all: "All Workspaces",
     },
     common: {
@@ -195,6 +196,33 @@ const I18N_CATALOG = {
       domain: "Domain",
       save_route: "Save & Apply Route",
     },
+    logs: {
+      heading: "Container Logs",
+      subtitle: "Read-only bounded logs from Docker or Podman, including ProxyConsole system containers.",
+      refresh: "Refresh Logs",
+      source: "Project / container source",
+      select_source: "Select a container",
+      severity: "Severity",
+      all_severities: "All severities",
+      tail: "Tail lines",
+      since: "Since",
+      search: "Literal text search",
+      search_placeholder: "Case-insensitive text",
+      poll: "Poll every 5 seconds while visible",
+      apply_filters: "Apply Filters",
+      loading: "Loading bounded log tail…",
+      unavailable: "Logs unavailable",
+      partial: "Inventory is partially available.",
+      results: "Log Lines",
+      no_source: "Select a source to load logs.",
+      truncated: "Response byte cap reached",
+      empty: "No log lines match the current filters.",
+      time: "Time",
+      stream: "Stream",
+      container: "Container",
+      message: "Message",
+      lines: "lines",
+    },
   },
   ja: {
     app: {
@@ -212,6 +240,7 @@ const I18N_CATALOG = {
       rules: "変更ルール",
       notifications: "通知",
       runtime: "実行中プロジェクト",
+      logs: "ログ",
       all: "全ワークスペース",
     },
     common: {
@@ -385,6 +414,33 @@ const I18N_CATALOG = {
       domain: "ドメイン",
       save_route: "保存してルートへ適用",
     },
+    logs: {
+      heading: "コンテナログ",
+      subtitle: "ProxyConsoleシステムコンテナを含むDocker / Podmanの読取専用・上限付きログです。",
+      refresh: "ログを更新",
+      source: "プロジェクト / コンテナ",
+      select_source: "コンテナを選択",
+      severity: "深刻度",
+      all_severities: "すべての深刻度",
+      tail: "末尾行数",
+      since: "開始時刻",
+      search: "文字列検索",
+      search_placeholder: "大文字小文字を区別しない文字列",
+      poll: "表示中のみ5秒ごとに更新",
+      apply_filters: "条件を適用",
+      loading: "上限付きログを読み込み中…",
+      unavailable: "ログを取得できません",
+      partial: "inventoryの一部を取得できませんでした。",
+      results: "ログ行",
+      no_source: "ログを読むコンテナを選択してください。",
+      truncated: "応答byte上限に到達",
+      empty: "現在の条件に一致するログ行はありません。",
+      time: "時刻",
+      stream: "ストリーム",
+      container: "コンテナ",
+      message: "本文",
+      lines: "行",
+    },
   },
 };
 
@@ -471,6 +527,12 @@ function applyTranslations(lang) {
   if (appState.runtimeInventory) {
     renderRuntimeInventory();
   }
+  if (appState.logsInventory) {
+    renderLogSources(appState.logsInventory);
+  }
+  if (appState.logsResult) {
+    renderLogsResult(appState.logsResult);
+  }
 }
 
 function setLanguage(lang) {
@@ -517,6 +579,10 @@ const appState = {
   targets: [],
   runtimeInventory: null,
   runtimeQuickTarget: null,
+  logsInventory: null,
+  logsResult: null,
+  logsPollTimer: null,
+  logsRequestPending: false,
   copySourceRoute: null,
   deleteTargetRoute: null,
   pendingOps: 0,
@@ -1752,12 +1818,14 @@ const viewRequestsBtn = document.getElementById("view-requests-btn");
 const viewRulesBtn = document.getElementById("view-rules-btn");
 const viewNotificationsBtn = document.getElementById("view-notifications-btn");
 const viewRuntimeBtn = document.getElementById("view-runtime-btn");
+const viewLogsBtn = document.getElementById("view-logs-btn");
 const overviewWorkspace = document.getElementById("overview-workspace");
 const routesWorkspace = document.getElementById("routes-workspace");
 const requestsWorkspace = document.getElementById("requests-workspace");
 const rulesWorkspace = document.getElementById("rules-workspace");
 const notificationsWorkspace = document.getElementById("notifications-workspace");
 const runtimeWorkspace = document.getElementById("runtime-workspace");
+const logsWorkspace = document.getElementById("logs-workspace");
 
 const capturesTotalBadge = document.getElementById("captures-total-badge");
 const refreshCapturesBtn = document.getElementById("refresh-captures-btn");
@@ -1931,6 +1999,7 @@ function setWorkspaceView(mode) {
     "rules",
     "notifications",
     "runtime",
+    "logs",
     "all",
   ];
   if (!validModes.includes(mode)) {
@@ -1961,6 +2030,9 @@ function setWorkspaceView(mode) {
   if (viewRuntimeBtn) {
     viewRuntimeBtn.setAttribute("aria-pressed", String(mode === "runtime"));
   }
+  if (viewLogsBtn) {
+    viewLogsBtn.setAttribute("aria-pressed", String(mode === "logs"));
+  }
 
   if (overviewWorkspace) {
     overviewWorkspace.hidden = mode !== "all" && mode !== "overview";
@@ -1981,6 +2053,9 @@ function setWorkspaceView(mode) {
   if (runtimeWorkspace) {
     runtimeWorkspace.hidden = mode !== "all" && mode !== "runtime";
   }
+  if (logsWorkspace) {
+    logsWorkspace.hidden = mode !== "all" && mode !== "logs";
+  }
 
   if (mode === "overview" || mode === "all") {
     refreshOverview();
@@ -1988,6 +2063,10 @@ function setWorkspaceView(mode) {
   if (mode === "runtime" || mode === "all") {
     loadRuntimeInventory();
   }
+  if (mode === "logs" || mode === "all") {
+    loadLogsWorkspace();
+  }
+  syncLogsPolling();
 }
 
 window.setWorkspaceView = setWorkspaceView;
@@ -2004,6 +2083,7 @@ function initWorkspace() {
     "rules",
     "notifications",
     "runtime",
+    "logs",
     "all",
   ];
   if (saved && validModes.includes(saved)) {
@@ -2035,6 +2115,9 @@ if (viewNotificationsBtn) {
 }
 if (viewRuntimeBtn) {
   viewRuntimeBtn.addEventListener("click", () => setWorkspaceView("runtime"));
+}
+if (viewLogsBtn) {
+  viewLogsBtn.addEventListener("click", () => setWorkspaceView("logs"));
 }
 
 // Overview Dashboard Logic
@@ -2290,6 +2373,7 @@ window.addEventListener("keydown", (e) => {
     "4": "rules",
     "5": "notifications",
     "6": "runtime",
+    "7": "logs",
   };
 
   const targetMode = map[e.key];
@@ -2657,6 +2741,255 @@ quickRouteHost?.addEventListener("input", updateQuickRoutePreview);
 quickRoutePort?.addEventListener("input", updateQuickRoutePreview);
 quickRouteForm?.addEventListener("submit", handleQuickRouteSubmit);
 quickRouteCloseBtn?.addEventListener("click", closeQuickRoute);
+
+// ================================================================
+// DEV-062: Provider-neutral Container Logs Workspace
+// ================================================================
+const logsProviderBadge = document.getElementById("logs-provider-badge");
+const logsResultBadge = document.getElementById("logs-result-badge");
+const logsRefreshBtn = document.getElementById("logs-refresh-btn");
+const logsFilterForm = document.getElementById("logs-filter-form");
+const logsSourceSelect = document.getElementById("logs-source-select");
+const logsSeveritySelect = document.getElementById("logs-severity-select");
+const logsTailSelect = document.getElementById("logs-tail-select");
+const logsSinceInput = document.getElementById("logs-since-input");
+const logsSearchInput = document.getElementById("logs-search-input");
+const logsPollCheckbox = document.getElementById("logs-poll-checkbox");
+const logsLoadingState = document.getElementById("logs-loading-state");
+const logsErrorBox = document.getElementById("logs-error-box");
+const logsErrorTitle = document.getElementById("logs-error-title");
+const logsErrorMessage = document.getElementById("logs-error-message");
+const logsPartialBox = document.getElementById("logs-partial-box");
+const logsPartialMessage = document.getElementById("logs-partial-message");
+const logsSourceSummary = document.getElementById("logs-source-summary");
+const logsTruncatedBadge = document.getElementById("logs-truncated-badge");
+const logsEmptyState = document.getElementById("logs-empty-state");
+const logsTbody = document.getElementById("logs-tbody");
+
+function readLogsPreferences() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("proxyconsole_logs_filters") || "{}");
+    if (logsSeveritySelect) logsSeveritySelect.value = saved.severity || "";
+    if (logsTailSelect && ["100", "200", "500", "1000"].includes(saved.tail)) {
+      logsTailSelect.value = saved.tail;
+    }
+    if (logsSinceInput) logsSinceInput.value = saved.since || "";
+    if (logsSearchInput) logsSearchInput.value = saved.search || "";
+    if (logsPollCheckbox) logsPollCheckbox.checked = saved.poll === true;
+    return typeof saved.source === "string" ? saved.source : "";
+  } catch (_err) {
+    return "";
+  }
+}
+
+function saveLogsPreferences() {
+  localStorage.setItem(
+    "proxyconsole_logs_filters",
+    JSON.stringify({
+      source: logsSourceSelect?.value || "",
+      severity: logsSeveritySelect?.value || "",
+      tail: logsTailSelect?.value || "200",
+      since: logsSinceInput?.value || "",
+      search: logsSearchInput?.value || "",
+      poll: Boolean(logsPollCheckbox?.checked),
+    })
+  );
+}
+
+let savedLogsSource = readLogsPreferences();
+
+function renderLogSources(inventory) {
+  if (!logsSourceSelect) return;
+  const previous = logsSourceSelect.value || savedLogsSource;
+  logsSourceSelect.textContent = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = t("logs.select_source");
+  logsSourceSelect.appendChild(placeholder);
+
+  const validSources = new Set();
+  for (const project of inventory?.projects || []) {
+    const group = document.createElement("optgroup");
+    group.label = `${project.name} · ${project.provider}`;
+    for (const container of project.containers || []) {
+      const option = document.createElement("option");
+      option.value = container.container_id;
+      option.textContent = `${container.service_name || container.container_name} · ${
+        container.container_name
+      } · ${container.state}`;
+      option.dataset.inventoryId = container.inventory_id;
+      option.dataset.project = project.name;
+      group.appendChild(option);
+      validSources.add(container.container_id);
+    }
+    if (group.children.length > 0) logsSourceSelect.appendChild(group);
+  }
+  logsSourceSelect.value = validSources.has(previous) ? previous : "";
+  savedLogsSource = "";
+  if (!logsSourceSelect.value && previous) saveLogsPreferences();
+
+  if (logsProviderBadge) {
+    logsProviderBadge.textContent = inventory?.provider || "-";
+    logsProviderBadge.className = `badge ${
+      inventory?.available ? "badge-success" : "badge-danger"
+    }`;
+  }
+  if (logsPartialBox && logsPartialMessage) {
+    const partialErrors = inventory?.partial_errors || [];
+    logsPartialBox.hidden = partialErrors.length === 0;
+    logsPartialMessage.textContent = partialErrors
+      .map((item) => `${String(item.container_id || "").slice(0, 12)}: ${item.error}`)
+      .join(" · ");
+  }
+}
+
+function renderLogsResult(result) {
+  if (!logsTbody) return;
+  logsTbody.textContent = "";
+  const lines = result?.lines || [];
+  const container = result?.container || {};
+  for (const line of lines) {
+    const row = document.createElement("tr");
+    row.dataset.severity = line.severity;
+    const timeCell = document.createElement("td");
+    timeCell.textContent = line.timestamp || "-";
+    const streamCell = document.createElement("td");
+    streamCell.textContent = line.stream;
+    const severityCell = document.createElement("td");
+    const severityBadge = document.createElement("span");
+    severityBadge.className = `badge ${
+      line.severity === "error"
+        ? "badge-danger"
+        : line.severity === "warn"
+          ? "badge-warn"
+          : "badge-neutral"
+    }`;
+    severityBadge.textContent = line.severity;
+    severityCell.appendChild(severityBadge);
+    const containerCell = document.createElement("td");
+    containerCell.textContent = container.container_name || "-";
+    const messageCell = document.createElement("td");
+    const message = document.createElement("pre");
+    message.className = "log-message";
+    message.textContent = line.text;
+    messageCell.appendChild(message);
+    row.append(timeCell, streamCell, severityCell, containerCell, messageCell);
+    logsTbody.appendChild(row);
+  }
+  if (logsResultBadge) {
+    logsResultBadge.textContent = `${lines.length} ${t("logs.lines")}`;
+  }
+  if (logsEmptyState) logsEmptyState.hidden = lines.length !== 0;
+  if (logsTruncatedBadge) logsTruncatedBadge.hidden = !result?.truncated;
+  if (logsSourceSummary) {
+    logsSourceSummary.textContent = container.container_id
+      ? `${container.project} / ${container.service_name || container.container_name} · ${
+          container.container_short_id
+        } · ${result.refreshed_at}`
+      : t("logs.no_source");
+  }
+}
+
+async function loadLogsInventory() {
+  const inventory = await apiRequest("/api/v1/runtime/projects");
+  appState.logsInventory = inventory;
+  renderLogSources(inventory);
+  if (!inventory.available) {
+    const err = new Error(inventory.error || t("logs.unavailable"));
+    err.status = 503;
+    throw err;
+  }
+  return inventory;
+}
+
+function buildLogsQuery() {
+  const params = new URLSearchParams();
+  params.set("container_id", logsSourceSelect.value);
+  params.set("tail", logsTailSelect.value || "200");
+  if (logsSeveritySelect.value) params.set("severity", logsSeveritySelect.value);
+  if (logsSearchInput.value.trim()) params.set("search", logsSearchInput.value.trim());
+  if (logsSinceInput.value) {
+    params.set("since", new Date(logsSinceInput.value).toISOString());
+  }
+  return params.toString();
+}
+
+async function loadSelectedLogs({ quiet = false } = {}) {
+  if (appState.logsRequestPending) return;
+  if (!logsSourceSelect?.value) {
+    appState.logsResult = null;
+    renderLogsResult(null);
+    return;
+  }
+  saveLogsPreferences();
+  appState.logsRequestPending = true;
+  if (!quiet && logsLoadingState) logsLoadingState.hidden = false;
+  if (logsRefreshBtn) logsRefreshBtn.disabled = true;
+  if (logsErrorBox) logsErrorBox.hidden = true;
+  try {
+    const result = await apiRequest(`/api/v1/runtime/logs?${buildLogsQuery()}`);
+    appState.logsResult = result;
+    renderLogsResult(result);
+  } catch (err) {
+    if (err.status === 404 && logsSourceSelect) {
+      logsSourceSelect.value = "";
+      saveLogsPreferences();
+      appState.logsResult = null;
+      renderLogsResult(null);
+    }
+    if (logsErrorBox) logsErrorBox.hidden = false;
+    if (logsErrorTitle) {
+      logsErrorTitle.textContent =
+        err.status === 503 ? t("logs.unavailable") : err.code || "log_source_error";
+    }
+    if (logsErrorMessage) logsErrorMessage.textContent = err.message;
+  } finally {
+    appState.logsRequestPending = false;
+    if (logsLoadingState) logsLoadingState.hidden = true;
+    if (logsRefreshBtn) logsRefreshBtn.disabled = false;
+  }
+}
+
+async function loadLogsWorkspace({ refreshInventory = false } = {}) {
+  try {
+    if (!appState.logsInventory || refreshInventory) await loadLogsInventory();
+    await loadSelectedLogs();
+  } catch (err) {
+    if (logsLoadingState) logsLoadingState.hidden = true;
+    if (logsErrorBox) logsErrorBox.hidden = false;
+    if (logsErrorTitle) logsErrorTitle.textContent = t("logs.unavailable");
+    if (logsErrorMessage) logsErrorMessage.textContent = err.message;
+  }
+}
+
+function syncLogsPolling() {
+  if (appState.logsPollTimer) {
+    clearInterval(appState.logsPollTimer);
+    appState.logsPollTimer = null;
+  }
+  const visible =
+    !document.hidden &&
+    (appState.workspaceView === "logs" || appState.workspaceView === "all");
+  if (visible && logsPollCheckbox?.checked) {
+    appState.logsPollTimer = setInterval(() => loadSelectedLogs({ quiet: true }), 5000);
+  }
+}
+
+window.getLogsPollingState = () => Boolean(appState.logsPollTimer);
+
+logsRefreshBtn?.addEventListener("click", () =>
+  loadLogsWorkspace({ refreshInventory: true })
+);
+logsFilterForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  loadSelectedLogs();
+});
+logsSourceSelect?.addEventListener("change", () => loadSelectedLogs());
+logsPollCheckbox?.addEventListener("change", () => {
+  saveLogsPreferences();
+  syncLogsPolling();
+});
+document.addEventListener("visibilitychange", syncLogsPolling);
 
 function buildCapturesQueryString() {
   const params = new URLSearchParams();

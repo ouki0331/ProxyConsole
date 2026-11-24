@@ -8,6 +8,7 @@ import struct
 import sys
 import threading
 import unittest
+from unittest.mock import patch
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -89,6 +90,14 @@ class EngineLogDecodeTest(unittest.TestCase):
         self.assertEqual(encoding, "multiplexed")
         self.assertEqual([line["text"] for line in lines], ["complete"])
 
+    def test_multiplexed_line_split_across_frames_is_reassembled(self) -> None:
+        payload = multiplex_frame(1, b"2026-11-24T01:02:03Z part") + multiplex_frame(
+            1, b" two\n"
+        )
+        lines, _ = decode_engine_log_payload(payload)
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0]["text"], "part two")
+
 
 class EngineLogsServiceTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -127,6 +136,7 @@ class EngineLogsServiceTest(unittest.TestCase):
             {"tail": "nope"},
             {"severity": "critical"},
             {"since": "yesterday"},
+            {"since": "2026-11-24T00:00:00"},
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(EngineLogsValidationError):
                 self.service.get_logs(container_id="a" * 64, **kwargs)
@@ -139,6 +149,35 @@ class EngineLogsServiceTest(unittest.TestCase):
         service = EngineLogsService(FakeDiscovery(available=False))  # type: ignore[arg-type]
         with self.assertRaises(EngineLogsUnavailableError):
             service.get_logs(container_id="a" * 64)
+
+    def test_engine_response_read_is_hard_capped(self) -> None:
+        class Response:
+            status = 200
+
+            def read(self, size: int) -> bytes:
+                return b"0123456789abcdef"[:size]
+
+        class Connection:
+            def __init__(self, *_args: object, **_kwargs: object) -> None:
+                pass
+
+            def request(self, *_args: object, **_kwargs: object) -> None:
+                pass
+
+            def getresponse(self) -> Response:
+                return Response()
+
+            def close(self) -> None:
+                pass
+
+        discovery = FakeDiscovery()
+        discovery.connection_factory = Connection  # type: ignore[attr-defined]
+        service = EngineLogsService(discovery)  # type: ignore[arg-type]
+        service.response_byte_cap = 8
+        with patch("engine_logs.os.path.exists", return_value=True):
+            payload, truncated = service._engine_get_bytes("/logs", socket_path="/fake")
+        self.assertEqual(payload, b"01234567")
+        self.assertTrue(truncated)
 
 
 class StubLogs:

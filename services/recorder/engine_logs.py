@@ -73,6 +73,17 @@ def _lines_for_chunk(chunk: bytes, stream: str) -> list[dict[str, Any]]:
     return items
 
 
+def _line_from_bytes(raw_line: bytes, stream: str) -> dict[str, Any]:
+    decoded = raw_line.rstrip(b"\r").decode("utf-8", errors="replace")
+    timestamp, text = _split_timestamp(decoded)
+    return {
+        "timestamp": timestamp,
+        "stream": stream,
+        "severity": classify_severity(text),
+        "text": text,
+    }
+
+
 def decode_engine_log_payload(payload: bytes) -> tuple[list[dict[str, Any]], str]:
     """Decode Docker multiplex frames, falling back to Podman/plain text."""
 
@@ -100,8 +111,15 @@ def decode_engine_log_payload(payload: bytes) -> tuple[list[dict[str, Any]], str
 
     if multiplex_prefix and (frames or offset < len(payload)):
         lines: list[dict[str, Any]] = []
+        pending = {"stdout": b"", "stderr": b""}
         for stream, chunk in frames:
-            lines.extend(_lines_for_chunk(chunk, stream))
+            combined = pending[stream] + chunk
+            parts = combined.split(b"\n")
+            pending[stream] = parts.pop()
+            lines.extend(_line_from_bytes(part, stream) for part in parts)
+        for stream in ("stdout", "stderr"):
+            if pending[stream]:
+                lines.append(_line_from_bytes(pending[stream], stream))
         return lines, "multiplexed"
 
     return _lines_for_chunk(payload, "stdout"), "plain"
@@ -126,9 +144,11 @@ class EngineLogsService:
         if not cleaned:
             return None
         try:
-            datetime.fromisoformat(cleaned.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(cleaned.replace("Z", "+00:00"))
         except ValueError as exc:
             raise EngineLogsValidationError("since must be an RFC3339 timestamp") from exc
+        if parsed.tzinfo is None:
+            raise EngineLogsValidationError("since must include an RFC3339 timezone")
         return cleaned
 
     @staticmethod

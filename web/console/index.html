@@ -34,6 +34,9 @@
       <button type="button" id="view-runtime-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="runtime" title="Runtime Projects (Alt+6)">
         <span data-i18n="nav.runtime">Runtime Projects</span> <kbd class="kbd-hint">Alt+6</kbd>
       </button>
+      <button type="button" id="view-logs-btn" class="nav-tab-btn btn btn-sm btn-secondary" aria-pressed="false" data-workspace="logs" title="Logs (Alt+7)">
+        <span data-i18n="nav.logs">Logs</span> <kbd class="kbd-hint">Alt+7</kbd>
+      </button>
     </nav>
     <div class="header-actions">
       <div class="lang-selector-wrap">
@@ -2412,6 +2415,106 @@
             <button type="submit" id="quick-route-submit-btn" class="btn btn-primary" data-i18n="runtime.save_route">Save &amp; Apply Route</button>
           </div>
         </form>
+      </section>
+    </div>
+
+    <!-- DEV-062: Provider-neutral Container Logs Workspace -->
+    <div id="logs-workspace" class="console-workspace" hidden>
+      <section class="card logs-hero" aria-labelledby="logs-workspace-heading">
+        <div class="card-header">
+          <div>
+            <h2 id="logs-workspace-heading" data-i18n="logs.heading">Container Logs</h2>
+            <p class="card-subtitle" data-i18n="logs.subtitle">Read-only bounded logs from Docker or Podman, including ProxyConsole system containers.</p>
+          </div>
+          <div class="discovery-controls">
+            <span id="logs-provider-badge" class="badge badge-neutral">-</span>
+            <span id="logs-result-badge" class="badge badge-outline">0 lines</span>
+            <button type="button" id="logs-refresh-btn" class="btn btn-secondary" data-i18n="logs.refresh">Refresh Logs</button>
+          </div>
+        </div>
+
+        <form id="logs-filter-form" class="logs-filter-grid">
+          <div class="form-group logs-source-field">
+            <label for="logs-source-select" data-i18n="logs.source">Project / container source</label>
+            <select id="logs-source-select" required>
+              <option value="" data-i18n="logs.select_source">Select a container</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="logs-severity-select" data-i18n="logs.severity">Severity</label>
+            <select id="logs-severity-select">
+              <option value="" data-i18n="logs.all_severities">All severities</option>
+              <option value="error">error</option>
+              <option value="warn">warn</option>
+              <option value="info">info</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="logs-tail-select" data-i18n="logs.tail">Tail lines</label>
+            <select id="logs-tail-select">
+              <option value="100">100</option>
+              <option value="200" selected>200</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="logs-since-input" data-i18n="logs.since">Since</label>
+            <input type="datetime-local" id="logs-since-input">
+          </div>
+          <div class="form-group logs-search-field">
+            <label for="logs-search-input" data-i18n="logs.search">Literal text search</label>
+            <input type="search" id="logs-search-input" data-i18n-placeholder="logs.search_placeholder" placeholder="Case-insensitive text">
+          </div>
+          <div class="form-group logs-poll-field">
+            <label class="checkbox-inline" for="logs-poll-checkbox">
+              <input type="checkbox" id="logs-poll-checkbox">
+              <span data-i18n="logs.poll">Poll every 5 seconds while visible</span>
+            </label>
+          </div>
+          <div class="form-actions logs-filter-actions">
+            <button type="submit" class="btn btn-primary" data-i18n="logs.apply_filters">Apply Filters</button>
+          </div>
+        </form>
+
+        <div id="logs-loading-state" class="empty-state" role="status" aria-live="polite" hidden>
+          <p data-i18n="logs.loading">Loading bounded log tail…</p>
+        </div>
+        <div id="logs-error-box" class="discovery-error-box" role="alert" hidden>
+          <strong id="logs-error-title" data-i18n="logs.unavailable">Logs unavailable</strong>
+          <span id="logs-error-message"></span>
+        </div>
+        <div id="logs-partial-box" class="apply-error-box" role="status" hidden>
+          <strong data-i18n="logs.partial">Inventory is partially available.</strong>
+          <span id="logs-partial-message"></span>
+        </div>
+      </section>
+
+      <section class="card logs-results-card" aria-labelledby="logs-results-heading">
+        <div class="card-header">
+          <div>
+            <h2 id="logs-results-heading" data-i18n="logs.results">Log Lines</h2>
+            <p id="logs-source-summary" class="card-subtitle" data-i18n="logs.no_source">Select a source to load logs.</p>
+          </div>
+          <span id="logs-truncated-badge" class="badge badge-warn" hidden data-i18n="logs.truncated">Response byte cap reached</span>
+        </div>
+        <div id="logs-empty-state" class="empty-state">
+          <p data-i18n="logs.empty">No log lines match the current filters.</p>
+        </div>
+        <div class="table-wrapper logs-table-wrapper" tabindex="0" role="region" aria-labelledby="logs-results-heading">
+          <table id="logs-table">
+            <thead>
+              <tr>
+                <th scope="col" data-i18n="logs.time">Time</th>
+                <th scope="col" data-i18n="logs.stream">Stream</th>
+                <th scope="col" data-i18n="logs.severity">Severity</th>
+                <th scope="col" data-i18n="logs.container">Container</th>
+                <th scope="col" data-i18n="logs.message">Message</th>
+              </tr>
+            </thead>
+            <tbody id="logs-tbody"></tbody>
+          </table>
+        </div>
       </section>
     </div>
   </main>

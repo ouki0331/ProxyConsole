@@ -52,6 +52,30 @@ assert "database_containers" in data, data
 print("    PASS: /api/v1/runtime/projects returned host-wide inventory contract")
 PY
 
+log_source_id="$(RUNTIME_JSON="${runtime_json}" python3 - <<'PY'
+import json, os
+data = json.loads(os.environ["RUNTIME_JSON"])
+for project in data.get("projects", []):
+    for container in project.get("containers", []):
+        if container.get("container_id"):
+            print(container["container_id"])
+            raise SystemExit(0)
+raise SystemExit("No runtime container available for logs API contract")
+PY
+)"
+logs_json="$(curl -fsS --get "${API_BASE}/api/v1/runtime/logs" --data-urlencode "container_id=${log_source_id}" --data-urlencode "tail=200" --data-urlencode "search=proxyconsole")"
+LOGS_JSON="${logs_json}" python3 - <<'PY'
+import json, os
+data = json.loads(os.environ["LOGS_JSON"])
+assert data["provider"] in ("docker", "podman"), data
+assert data["requested"]["tail"] == 200, data
+assert isinstance(data["lines"], list), data
+assert data["returned"] == len(data["lines"]), data
+assert all(set(("timestamp", "stream", "severity", "text")) <= set(line) for line in data["lines"]), data
+assert data["response_byte_cap"] > 0, data
+print("    PASS: /api/v1/runtime/logs returned bounded provider-neutral schema")
+PY
+
 # Now run Browser CDP E2E tests
 echo "--> Step 3: Launching Headless Chrome for CDP E2E verification"
 API_BASE="${API_BASE}" python3 - <<'PY'
@@ -279,6 +303,7 @@ try:
           rulesHidden: document.getElementById('rules-workspace')?.hidden,
           notifHidden: document.getElementById('notifications-workspace')?.hidden,
           runtimeHidden: document.getElementById('runtime-workspace')?.hidden,
+          logsHidden: document.getElementById('logs-workspace')?.hidden,
           hasRouteFormInOverview: document.getElementById('overview-workspace')?.querySelector('form') !== null,
           hasRuleFormInOverview: document.getElementById('overview-workspace')?.querySelector('#rule-form') !== null,
           overviewPressed: document.getElementById('view-overview-btn')?.getAttribute('aria-pressed'),
@@ -292,6 +317,7 @@ try:
     assert state["rulesHidden"] is True, state
     assert state["notifHidden"] is True, state
     assert state["runtimeHidden"] is True, state
+    assert state["logsHidden"] is True, state
     assert state["hasRouteFormInOverview"] is False, "Overview must not contain forms"
     assert state["hasRuleFormInOverview"] is False, "Overview must not contain rule form"
     assert state["overviewPressed"] == "true", state
@@ -502,6 +528,77 @@ try:
     assert cleanup_quick["ok"] is True, cleanup_quick
     print("       PASS: Quick route created with domain-only flow and cleaned up")
 
+    # Press Alt+7, exercise Logs filters, reload persistence, and polling visibility guard.
+    cdp.eval_js(
+        """
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '7', altKey: true, bubbles: true }));
+        """
+    )
+    logs_state = cdp.eval_js(
+        """
+        const deadline = Date.now() + 5000;
+        const source = document.getElementById('logs-source-select');
+        while (source.options.length < 2 && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        source.value = source.options[1]?.value || '';
+        document.getElementById('logs-severity-select').value = 'info';
+        document.getElementById('logs-tail-select').value = '500';
+        document.getElementById('logs-search-input').value = 'proxyconsole';
+        document.getElementById('logs-poll-checkbox').checked = true;
+        document.getElementById('logs-filter-form').dispatchEvent(
+          new Event('submit', { cancelable: true, bubbles: true })
+        );
+        document.getElementById('logs-poll-checkbox').dispatchEvent(
+          new Event('change', { bubbles: true })
+        );
+        await new Promise(resolve => setTimeout(resolve, 750));
+        return {
+          hidden: document.getElementById('logs-workspace').hidden,
+          pressed: document.getElementById('view-logs-btn').getAttribute('aria-pressed'),
+          sources: source.options.length,
+          savedWorkspace: localStorage.getItem('proxyconsole_workspace'),
+          savedFilters: JSON.parse(localStorage.getItem('proxyconsole_logs_filters')),
+          polling: window.getLogsPollingState(),
+        };
+        """
+    )
+    assert logs_state["hidden"] is False, logs_state
+    assert logs_state["pressed"] == "true", logs_state
+    assert logs_state["sources"] >= 2, logs_state
+    assert logs_state["savedWorkspace"] == "logs", logs_state
+    assert logs_state["savedFilters"]["tail"] == "500", logs_state
+    assert logs_state["savedFilters"]["severity"] == "info", logs_state
+    assert logs_state["polling"] is True, logs_state
+
+    cdp.call("Page.reload", {"ignoreCache": True})
+    cdp.wait_idle()
+    persisted_logs = cdp.eval_js(
+        """
+        await new Promise(resolve => setTimeout(resolve, 750));
+        return {
+          hidden: document.getElementById('logs-workspace')?.hidden,
+          tail: document.getElementById('logs-tail-select')?.value,
+          severity: document.getElementById('logs-severity-select')?.value,
+          search: document.getElementById('logs-search-input')?.value,
+          source: document.getElementById('logs-source-select')?.value,
+        };
+        """
+    )
+    assert persisted_logs["hidden"] is False, persisted_logs
+    assert persisted_logs["tail"] == "500", persisted_logs
+    assert persisted_logs["severity"] == "info", persisted_logs
+    assert persisted_logs["search"] == "proxyconsole", persisted_logs
+    assert persisted_logs["source"], persisted_logs
+    polling_stopped = cdp.eval_js(
+        """
+        window.setWorkspaceView('overview');
+        return !window.getLogsPollingState();
+        """
+    )
+    assert polling_stopped is True, polling_stopped
+    print("       PASS: Alt+7, source/filter reload persistence, and hidden polling stop verified")
+
     # Press Alt+1 to return to Overview
     cdp.eval_js(
         """
@@ -529,17 +626,17 @@ try:
         const input = document.getElementById('route-domain');
         input.focus();
         input.value = 'editing.test';
-        // Dispatch Alt+3 while input is active
-        input.dispatchEvent(new KeyboardEvent('keydown', { key: '3', altKey: true, bubbles: true }));
+        // Dispatch Alt+7 while input is active
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: '7', altKey: true, bubbles: true }));
         return {
           routesHidden: document.getElementById('routes-workspace')?.hidden,
-          requestsHidden: document.getElementById('requests-workspace')?.hidden,
+          logsHidden: document.getElementById('logs-workspace')?.hidden,
           inputValue: input.value,
         };
         """
     )
     assert guard_state["routesHidden"] is False, "Workspace must NOT switch while editing input"
-    assert guard_state["requestsHidden"] is True, "Requests must NOT become visible"
+    assert guard_state["logsHidden"] is True, "Logs must NOT become visible"
     assert guard_state["inputValue"] == "editing.test", "Input value must remain intact"
     print("       PASS: Input guard successfully prevented workspace switch while typing")
 
@@ -607,15 +704,19 @@ try:
     )
     resp_check = cdp.eval_js(
         """
+        window.setWorkspaceView('logs');
         const nav = document.querySelector('.header-nav');
         const rect = nav.getBoundingClientRect();
         return {
           width: rect.width,
-          overviewVisible: !document.getElementById('overview-workspace')?.hidden,
+          logsVisible: !document.getElementById('logs-workspace')?.hidden,
+          tableDisplay: getComputedStyle(document.getElementById('logs-table')).display,
         };
         """
     )
     assert resp_check["width"] <= 390, resp_check
+    assert resp_check["logsVisible"] is True, resp_check
+    assert resp_check["tableDisplay"] == "block", resp_check
     print("       PASS: 390px narrow viewport verified")
 
     # 8. Representative Flows in Both Japanese and English (AC-13)
