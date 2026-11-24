@@ -88,6 +88,8 @@ services:
     depends_on:
       - echo-a
       - echo-b
+    extra_hosts:
+      - "${CONTAINER_HOST_ALIAS:-host.docker.internal}:host-gateway"
     networks:
       - inspector_router_net
       - router_targets_net

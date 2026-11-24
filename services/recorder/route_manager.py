@@ -446,6 +446,7 @@ class RouteManager:
         target_id: str | None = None,
         container: str | None = None,
         port: int | None = None,
+        target_scope: str = "project",
         allow_self_target: bool = False,
         target_metadata: dict[str, Any] | None = None,
         route_id: str | None = None,
@@ -466,6 +467,7 @@ class RouteManager:
                 port=port if port is not None else upstream_port,
                 upstream_scheme=clean_scheme,
                 allow_self=allow_self_target,
+                scope=target_scope,
             )
             clean_scheme = validate_upstream_scheme(resolved["upstream_scheme"])
             clean_host = validate_upstream_host(resolved["upstream_host"])
@@ -564,6 +566,7 @@ class RouteManager:
         target_id: str | None = None,
         container: str | None = None,
         port: int | None = None,
+        target_scope: str = "project",
         upstream_scheme: str = "http",
         allow_self_target: bool = False,
         route_id: str | None = None,
@@ -581,6 +584,7 @@ class RouteManager:
             target_id=target_id,
             container=container,
             port=port,
+            target_scope=target_scope,
             allow_self_target=allow_self_target,
             route_id=route_id,
             enabled=enabled,
@@ -599,6 +603,7 @@ class RouteManager:
         target_id: str | None = None,
         container: str | None = None,
         port: int | None = None,
+        target_scope: str = "project",
         allow_self_target: bool = False,
         enabled: bool | None = None,
         description: str | None = None,
@@ -615,6 +620,7 @@ class RouteManager:
                 port=port if port is not None else upstream_port,
                 upstream_scheme=upstream_scheme or "http",
                 allow_self=allow_self_target,
+                scope=target_scope,
             )
 
         with self._exclusive_lock():

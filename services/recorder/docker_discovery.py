@@ -164,7 +164,11 @@ class DockerDiscoveryService:
     ) -> bool:
         if scope == "all":
             return True
-        proj = str(labels.get("com.docker.compose.project") or "")
+        proj = str(
+            labels.get("com.docker.compose.project")
+            or labels.get("io.podman.compose.project")
+            or ""
+        )
         if proj == self.compose_project:
             return True
         if str(labels.get("proxyconsole.discoverable") or "").lower() == "true":
@@ -214,21 +218,44 @@ class DockerDiscoveryService:
         config = detail.get("Config") or {}
         labels = config.get("Labels") or summary.get("Labels") or {}
         service_name = str(
-            labels.get("com.docker.compose.service") or container_name
+            labels.get("com.docker.compose.service")
+            or labels.get("io.podman.compose.service")
+            or container_name
         )
-        compose_project = str(labels.get("com.docker.compose.project") or "")
+        compose_project = str(
+            labels.get("com.docker.compose.project")
+            or labels.get("io.podman.compose.project")
+            or ""
+        )
         image = str(config.get("Image") or summary.get("Image") or "")
 
         state_obj = detail.get("State") or {}
         docker_state = str(
             state_obj.get("Status") or summary.get("State") or "unknown"
         ).lower()
-        is_running = bool(state_obj.get("Running")) and docker_state == "running"
+        is_running = (
+            bool(state_obj.get("Running"))
+            if "Running" in state_obj
+            else docker_state == "running"
+        )
+        is_running = is_running and docker_state == "running"
         normalized_state = "running" if is_running else "stopped"
         status_text = str(summary.get("Status") or docker_state)
+        health_obj = state_obj.get("Health") or {}
+        health_status = str(health_obj.get("Status") or "none").lower()
+        if health_status not in ("healthy", "unhealthy", "starting"):
+            health_status = "none"
 
         is_self = self._is_self_container(container_name, service_name, labels)
         role = "system" if is_self else "target"
+        if is_self:
+            project_scope = "system"
+        elif compose_project == self.compose_project:
+            project_scope = "same_project"
+        elif compose_project:
+            project_scope = "external_project"
+        else:
+            project_scope = "standalone"
 
         net_settings = detail.get("NetworkSettings") or {}
         networks_map = (
@@ -386,11 +413,55 @@ class DockerDiscoveryService:
         target_candidates: list[dict[str, Any]] = []
         target_key_name = service_name or container_name
 
+        host_alias = (
+            "host.containers.internal"
+            if self.provider == "podman"
+            else "host.docker.internal"
+        )
+
         for (p_num, proto) in sorted(ports_by_key.keys()):
             if proto != "tcp":
                 continue
             p_info = ports_by_key[(p_num, proto)]
-            target_id = f"docker:{target_key_name}:{p_num}"
+            published_candidate = next(
+                (
+                    pub
+                    for pub in p_info["published_ports"]
+                    if str(pub.get("host_ip") or "") in ("", "0.0.0.0", "::")
+                    and int(pub.get("host_port") or 0) > 0
+                ),
+                None,
+            )
+            if reachable_from_router:
+                reachability = "shared_router_network"
+                route_host = preferred_host
+                route_port = p_num
+            elif published_candidate is not None:
+                reachability = "published_host_port"
+                route_host = host_alias
+                route_port = int(published_candidate["host_port"])
+            elif p_info["published_ports"]:
+                reachability = "published_loopback_only"
+                route_host = preferred_host
+                route_port = p_num
+            else:
+                reachability = "network_attachment_required"
+                route_host = preferred_host
+                route_port = p_num
+
+            if not is_running:
+                reachability = "stopped"
+            selectable = bool(
+                is_running
+                and not is_self
+                and reachability
+                in ("shared_router_network", "published_host_port")
+            )
+            target_id = (
+                f"docker:{target_key_name}:{p_num}"
+                if project_scope in ("system", "same_project")
+                else f"engine:{self.provider}:{short_id}:{p_num}"
+            )
             port_entry = {
                 "target_id": target_id,
                 "internal_port": p_num,
@@ -398,12 +469,11 @@ class DockerDiscoveryService:
                 "exposed": bool(p_info["exposed"]),
                 "published_ports": p_info["published_ports"],
                 "upstream_scheme": "http",
-                "upstream_host": preferred_host,
-                "upstream_port": p_num,
-                "upstream_url": f"http://{preferred_host}:{p_num}",
-                "selectable": bool(
-                    is_running and not is_self and reachable_from_router
-                ),
+                "upstream_host": route_host,
+                "upstream_port": route_port,
+                "upstream_url": f"http://{route_host}:{route_port}",
+                "reachability": reachability,
+                "selectable": selectable,
             }
             sorted_ports.append(port_entry)
             target_candidates.append(
@@ -420,14 +490,17 @@ class DockerDiscoveryService:
                     "running": is_running,
                     "is_self": is_self,
                     "role": role,
+                    "provider": self.provider,
+                    "inventory_id": f"{self.provider}:{cid}",
+                    "project_scope": project_scope,
+                    "health": health_status,
                     "reachable_from_router": reachable_from_router,
-                    "selectable": bool(
-                        is_running and not is_self and reachable_from_router
-                    ),
+                    "reachability": reachability,
+                    "selectable": selectable,
                     "upstream_scheme": "http",
-                    "upstream_host": preferred_host,
-                    "upstream_port": p_num,
-                    "upstream_url": f"http://{preferred_host}:{p_num}",
+                    "upstream_host": route_host,
+                    "upstream_port": route_port,
+                    "upstream_url": f"http://{route_host}:{route_port}",
                     "protocol": proto,
                     "published_ports": p_info["published_ports"],
                     "networks": [n["network_name"] for n in networks_list],
@@ -435,6 +508,8 @@ class DockerDiscoveryService:
             )
 
         container_record = {
+            "provider": self.provider,
+            "inventory_id": f"{self.provider}:{cid}",
             "container_id": cid,
             "container_short_id": short_id,
             "container_name": container_name,
@@ -445,8 +520,10 @@ class DockerDiscoveryService:
             "docker_state": docker_state,
             "running": is_running,
             "status": status_text,
+            "health": health_status,
             "is_self": is_self,
             "role": role,
+            "project_scope": project_scope,
             "reachable_from_router": reachable_from_router,
             "preferred_host": preferred_host,
             "networks": networks_list,
@@ -476,6 +553,7 @@ class DockerDiscoveryService:
 
             all_containers: list[dict[str, Any]] = []
             all_targets: list[dict[str, Any]] = []
+            partial_errors: list[dict[str, str]] = []
 
             for item in raw_list:
                 if not isinstance(item, dict):
@@ -489,10 +567,19 @@ class DockerDiscoveryService:
                 cid = str(item.get("Id") or "")
                 if not cid:
                     continue
-                detail = self._docker_get_json(
-                    f"/containers/{quote(cid)}/json", socket_path=socket_path
-                )
-                if not isinstance(detail, dict):
+                try:
+                    detail = self._docker_get_json(
+                        f"/containers/{quote(cid)}/json", socket_path=socket_path
+                    )
+                    if not isinstance(detail, dict):
+                        detail = item
+                except DiscoveryUnavailableError as exc:
+                    partial_errors.append(
+                        {
+                            "container_id": cid,
+                            "error": str(exc),
+                        }
+                    )
                     detail = item
                 c_rec, c_targets = self._extract_container_and_targets(item, detail)
                 all_containers.append(c_rec)
@@ -554,6 +641,7 @@ class DockerDiscoveryService:
                 "socket_path": socket_path,
                 "refreshed_at": now_iso,
                 "error": None,
+                "partial_errors": partial_errors,
                 "fallback_manual_upstream_supported": True,
                 "all_containers": all_containers,
                 "all_targets": all_targets,
@@ -586,6 +674,7 @@ class DockerDiscoveryService:
                 "socket_path": socket_path,
                 "refreshed_at": now_iso,
                 "error": err_msg,
+                "partial_errors": [],
                 "fallback_manual_upstream_supported": True,
                 "all_containers": [],
                 "all_targets": [],
@@ -656,6 +745,7 @@ class DockerDiscoveryService:
             "socket_path": scan["socket_path"],
             "refreshed_at": scan["refreshed_at"],
             "error": scan["error"],
+            "partial_errors": scan.get("partial_errors", []),
             "fallback_manual_upstream_supported": True,
             "include_self": bool(include_self),
             "state_filter": state or "all",
@@ -683,6 +773,7 @@ class DockerDiscoveryService:
             "socket_path": scan["socket_path"],
             "refreshed_at": scan["refreshed_at"],
             "error": scan["error"],
+            "partial_errors": scan.get("partial_errors", []),
             "fallback_manual_upstream_supported": True,
             "include_self": bool(include_self),
             "include_stopped": bool(include_stopped),
@@ -715,6 +806,7 @@ class DockerDiscoveryService:
             "socket_path": scan["socket_path"],
             "refreshed_at": scan["refreshed_at"],
             "error": scan["error"],
+            "partial_errors": scan.get("partial_errors", []),
             "fallback_manual_upstream_supported": True,
             "include_self": bool(include_self),
             "include_stopped": bool(include_stopped),
@@ -722,6 +814,95 @@ class DockerDiscoveryService:
             "containers": containers,
             "targets_total": len(targets),
             "targets": targets,
+        }
+
+    def get_runtime_projects(self) -> dict[str, Any]:
+        """Return a host-wide, read-only project and container inventory."""
+
+        scan = self._scan_docker(scope="all")
+        containers = scan["all_containers"]
+        grouped: dict[str, dict[str, Any]] = {}
+        db_keywords = (
+            "postgres",
+            "mysql",
+            "mariadb",
+            "mongo",
+            "redis",
+            "cockroach",
+            "elasticsearch",
+        )
+        database_containers: list[dict[str, Any]] = []
+
+        for container in containers:
+            project_name = str(container.get("compose_project") or "standalone")
+            project_key = f"{self.provider}:{project_name}"
+            project = grouped.setdefault(
+                project_key,
+                {
+                    "project_id": project_key,
+                    "provider": self.provider,
+                    "name": project_name,
+                    "scope": container["project_scope"],
+                    "running": 0,
+                    "stopped": 0,
+                    "containers": [],
+                },
+            )
+            project[container["state"]] += 1
+            project["containers"].append(container)
+
+            db_haystack = " ".join(
+                (
+                    str(container.get("service_name") or ""),
+                    str(container.get("container_name") or ""),
+                    str(container.get("image") or ""),
+                )
+            ).lower()
+            if any(keyword in db_haystack for keyword in db_keywords):
+                database_containers.append(
+                    {
+                        "inventory_id": container["inventory_id"],
+                        "project": project_name,
+                        "service_name": container["service_name"],
+                        "container_name": container["container_name"],
+                        "state": container["state"],
+                        "health": container["health"],
+                        "image": container["image"],
+                    }
+                )
+
+        projects = sorted(
+            grouped.values(),
+            key=lambda item: (
+                0 if item["scope"] == "same_project" else 1,
+                item["name"],
+            ),
+        )
+        for project in projects:
+            project["containers"].sort(
+                key=lambda item: (item["service_name"], item["container_name"])
+            )
+
+        non_system = [c for c in containers if not c["is_self"]]
+        return {
+            "available": scan["available"],
+            "status": scan["status"],
+            "provider": self.provider,
+            "refreshed_at": scan["refreshed_at"],
+            "error": scan["error"],
+            "partial_errors": scan.get("partial_errors", []),
+            "summary": {
+                "projects": len(projects),
+                "containers": len(non_system),
+                "running": sum(1 for c in non_system if c["running"]),
+                "stopped": sum(1 for c in non_system if not c["running"]),
+                "selectable_targets": sum(
+                    1 for target in scan["all_targets"] if target["selectable"]
+                ),
+                "database_containers": len(database_containers),
+            },
+            "projects": projects,
+            "database_containers": database_containers,
         }
 
     def resolve_target(
@@ -799,7 +980,7 @@ class DockerDiscoveryService:
             if port is not None:
                 want_port = int(port)
                 for t in c_targets:
-                    if t["upstream_port"] == want_port:
+                    if want_port in (t["internal_port"], t["upstream_port"]):
                         matched_target = t
                         break
                 if matched_target is None:
@@ -836,9 +1017,13 @@ class DockerDiscoveryService:
                 f"(state={matched_target['state']!r})"
             )
 
-        if not matched_target["reachable_from_router"] and not allow_self:
+        if matched_target["reachability"] not in (
+            "shared_router_network",
+            "published_host_port",
+        ):
             raise DiscoveryTargetValidationError(
-                f"Target {matched_target['target_id']!r} is not attached to the internal router network"
+                f"Target {matched_target['target_id']!r} is not reachable from the router "
+                f"(reason={matched_target['reachability']!r})"
             )
 
         return {
@@ -847,13 +1032,18 @@ class DockerDiscoveryService:
             "upstream_port": matched_target["upstream_port"],
             "target_metadata": {
                 "source": "docker_discovery",
+                "provider": matched_target["provider"],
                 "target_id": matched_target["target_id"],
                 "container_id": matched_target["container_id"],
                 "container_short_id": matched_target["container_short_id"],
                 "container_name": matched_target["container_name"],
                 "service_name": matched_target["service_name"],
+                "compose_project": matched_target["compose_project"],
+                "project_scope": matched_target["project_scope"],
                 "image": matched_target["image"],
-                "selected_port": matched_target["upstream_port"],
+                "selected_port": matched_target["internal_port"],
+                "resolved_upstream_port": matched_target["upstream_port"],
+                "reachability": matched_target["reachability"],
                 "selected_at": scan["refreshed_at"],
             },
             "resolved_target": matched_target,

@@ -240,6 +240,12 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if path == "/api/v1/runtime/projects":
+                self._send_json(
+                    200, self.store.discovery.get_runtime_projects()
+                )
+                return
+
             if path == "/api/v1/discovery/containers":
                 inc_self_str = _first_param(qs, "include_self")
                 inc_self = (
@@ -872,6 +878,7 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
             target_id=body.get("target_id"),
             container=body.get("container"),
             port=body.get("port"),
+            target_scope=str(body.get("target_scope") or "project"),
             allow_self_target=allow_self,
             enabled=enabled_val,
             description=body.get("description"),
@@ -1145,6 +1152,7 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                         target_id=body.get("target_id"),
                         container=body.get("container"),
                         port=body.get("port"),
+                        target_scope=str(body.get("target_scope") or "project"),
                         upstream_scheme=body.get("upstream_scheme", "http"),
                         allow_self_target=allow_self,
                         route_id=body.get("route_id"),
@@ -1161,6 +1169,7 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
                         target_id=body.get("target_id"),
                         container=body.get("container"),
                         port=body.get("port"),
+                        target_scope=str(body.get("target_scope") or "project"),
                         allow_self_target=allow_self,
                         route_id=body.get("route_id"),
                         enabled=enabled,

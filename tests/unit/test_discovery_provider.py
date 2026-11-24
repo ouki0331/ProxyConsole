@@ -42,6 +42,62 @@ class DiscoveryProviderTest(unittest.TestCase):
         self.assertEqual(result["provider"], "podman")
         self.assertTrue(result["available"])
 
+    def test_external_published_port_is_selectable_without_name_collision(self) -> None:
+        with patch.dict(os.environ, {"CONTAINER_ENGINE_PROVIDER": "podman"}):
+            service = DockerDiscoveryService(store=None)  # type: ignore[arg-type]
+        summary = {
+            "Id": "a" * 64,
+            "Names": ["/api"],
+            "State": "running",
+            "Status": "Up 10 minutes",
+            "Labels": {
+                "com.docker.compose.project": "external",
+                "com.docker.compose.service": "api",
+            },
+            "Ports": [
+                {
+                    "PrivatePort": 8080,
+                    "PublicPort": 18080,
+                    "IP": "0.0.0.0",
+                    "Type": "tcp",
+                }
+            ],
+            "NetworkSettings": {"Networks": {"external_default": {}}},
+        }
+        detail = {
+            "Id": "a" * 64,
+            "Name": "/api",
+            "Config": {
+                "Image": "example/api:latest",
+                "Labels": summary["Labels"],
+                "ExposedPorts": {"8080/tcp": {}},
+            },
+            "State": {"Status": "running", "Running": True},
+            "NetworkSettings": {
+                "Networks": {
+                    "external_default": {
+                        "IPAddress": "10.0.0.2",
+                        "Aliases": ["api"],
+                    }
+                },
+                "Ports": {
+                    "8080/tcp": [
+                        {"HostIp": "0.0.0.0", "HostPort": "18080"}
+                    ]
+                },
+            },
+        }
+        container, targets = service._extract_container_and_targets(summary, detail)
+        self.assertEqual(container["project_scope"], "external_project")
+        self.assertEqual(container["health"], "none")
+        self.assertEqual(len(targets), 1)
+        target = targets[0]
+        self.assertEqual(target["target_id"], f"engine:podman:{'a' * 12}:8080")
+        self.assertEqual(target["reachability"], "published_host_port")
+        self.assertEqual(target["upstream_host"], "host.containers.internal")
+        self.assertEqual(target["upstream_port"], 18080)
+        self.assertTrue(target["selectable"])
+
 
 if __name__ == "__main__":
     unittest.main()

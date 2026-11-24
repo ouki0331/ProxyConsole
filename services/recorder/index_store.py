@@ -1392,7 +1392,9 @@ class CaptureIndexStore:
         # Docker discovery status
         try:
             disc_status = self.discovery.get_status(refresh=False)
-            cont_res = self.discovery.list_containers(include_self=False)
+            cont_res = self.discovery.list_containers(
+                include_self=False, scope="all"
+            )
             containers = cont_res.get("containers", [])
             running_containers = sum(1 for c in containers if c.get("state") == "running")
             stopped_containers = sum(1 for c in containers if c.get("state") != "running")

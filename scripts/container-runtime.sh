@@ -98,6 +98,11 @@ fi
 
 export CONTAINER_RUNTIME="${CONTAINER_ENGINE_PROVIDER}"
 export CONTAINER_ENGINE_SOCKET="${CONTAINER_ENGINE_SOCKET:-${_pc_default_socket}}"
+if [[ "${CONTAINER_ENGINE_PROVIDER}" == "podman" ]]; then
+  export CONTAINER_HOST_ALIAS="${CONTAINER_HOST_ALIAS:-host.containers.internal}"
+else
+  export CONTAINER_HOST_ALIAS="${CONTAINER_HOST_ALIAS:-host.docker.internal}"
+fi
 export PROXYCONSOLE_RUNTIME_READY=1
 
 _pc_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
