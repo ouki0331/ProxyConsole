@@ -41,9 +41,9 @@ ProxyConsole は、単一利用者が自分の WSL / Linux 上の Docker また�
 | Console | Localization | `CON-I18N-001` | 英語 / 日本語 UI と永続言語選択 | Confirmed | Available |
 | Console | Overview | `CON-DASH-001` | フォームを持たないローカル状態 Dashboard | Confirmed | Available |
 | Console | Navigation | `CON-NAV-001` | workspace tab と keyboard shortcut | Confirmed | Available (Alt+1〜6) |
-| Runtime | Project inventory | `RUN-PROJ-001` | Docker / Podman Compose project / container の稼働・停止・health 集約 | Implemented | Available (review pending) |
+| Runtime | Project inventory | `RUN-PROJ-001` | Docker / Podman Compose project / container の稼働・停止・health 集約 | Confirmed | Available |
 | Runtime | Logs | `RUN-LOG-001` | container / proxy / Nginx log の一覧・tail・filter | Confirmed | Partial |
-| Runtime | Local data | `RUN-DATA-001` | SQLite と DB container の状態サマリ | Implemented | Available (review pending) |
+| Runtime | Local data | `RUN-DATA-001` | SQLite と DB container の状態サマリ | Confirmed | Available |
 | Collaboration | Access control | `COL-AUTH-001` | SSO / RBAC / multi-user | Deferred | Not built |
 | Deployment | Shared environment | `DEP-SHARE-001` | 会社共有 host / public deployment | Deferred | Not built |
 

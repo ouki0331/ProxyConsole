@@ -3,14 +3,14 @@
 Updated: 2026-11-24
 Phase: P7
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 deferred / G7 pending
-Active task: DEV-061
-Task status: Ready for review
-Owner: orchestrator
-Last verified commit: `491aae5` (DEV-060 review 002 approved; static/runtime unit evidence passed, Docker/Podman integration CI deferred by environment)
+Active task: DEV-062
+Task status: In progress
+Owner: implementer
+Last verified commit: `bcedfb3` (DEV-061 review 001 approved; static/unit/read-only evidence passed, Docker/Podman integration CI deferred by environment)
 Last substantive remote progress: `bcedfb3` (host-wide inventory, Runtime Projects, quick route, demo profile separation, and browser E2E definition implemented)
-Task definition baseline: `491aae5`
-Dispatched at: 2026-11-25 00:25 JST
-Mailbox dispatch: `18` (`.agents/dispatch.json`)
+Task definition baseline: `bcedfb3`
+Dispatched at: 2026-11-25 00:55 JST
+Mailbox dispatch: `19` (`.agents/dispatch.json`)
 
 ## Current summary
 
@@ -36,15 +36,17 @@ Mailbox dispatch: `18` (`.agents/dispatch.json`)
 - DEV-060 review 002はblocking findingなしでApprovedとなり、`Done`とした。Deferred CIはG7完了前のbacklogに残した。
 - DEV-061を開始し、host-wide inventory、Runtime Projects、簡易route setup、demo profile分離をdispatch 18で割り当てた。
 - DEV-061のbackend/UI/test実装とstatic/unit検証が完了した。Podman local CIはruntime未導入でDeferredとなり、`Ready for review`とした。
+- DEV-061 review 001はblocking findingなしでApprovedとなり、`Done`とした。
+- DEV-062 provider-neutral logs workspaceをdispatch 19で開始した。
 
 ## Next transition
 
-orchestratorがDEV-061 artifact `5b3ad24`、`6916904`、`bcedfb3`をreviewする。blocking defectがなければDeferred CIをbacklogに保持してDEV-062 provider-neutral logsへ進む。
+実装AgentがDEV-062に従い、provider-neutral Engine logs API、Logs workspace、Alt+7、filter/polling、unit/browser E2E定義を実装する。phase完了時にlocal CIを一回だけ実行し、環境制約時はDeferred CIとして記録する。
 
 ## Blocking items
 
 - 現在の orchestrator 環境には `docker` / `podman` command がない。runtime compatibility 実装後の local CI は各 runtime を利用できるローカル実行環境で行い、未実行側を成功扱いにしない。
-- LogsはDEV-061合格後にDEV-062として実装する。
+- なし。Deferred CIはblockingではなくVerification backlogとしてG7判定前に再評価する。
 
 ## Verification backlog
 
