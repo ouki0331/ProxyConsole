@@ -1,10 +1,10 @@
 # Project status
 
-Updated: 2026-11-15
+Updated: 2026-11-24
 Phase: P7
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 deferred / G7 pending
 Active task: DEV-060
-Task status: Ready for review
+Task status: Blocked
 Owner: orchestrator
 Last verified commit: `8a84edc` (DEV-042 approved by independent review 002; Review 001 findings fixed and all 12 suites verified)
 Last substantive remote progress: `f18d6f4` (DEV-060 Japanese localization, overview dashboard, and workspace shortcuts implemented and verified)
@@ -34,8 +34,9 @@ Mailbox dispatch: `16` (`.agents/dispatch.json`)
 
 ## Next transition
 
-orchestrator が DEV-060 の独立機能 review を実施し、問題がなければ `Done` とする。
+Docker CLI / Docker Engine を利用できる review 環境で `make test` を再実行する。全13 suite の独立再検証が成功した場合のみ DEV-060 を `Done` とし、利用者フィードバックを反映した DEV-061（host-wide container inventory と簡易 route setup）を詳細化する。
 
 ## Blocking items
 
-- なし。Runtime Projects / Logs は DEV-060 合格後に DEV-061 / DEV-062 として順次詳細化する。
+- 2026-11-24 の独立 review 環境に `docker` command がなく、`make test` は `scripts/verify-config.sh: line 10: docker: command not found` で終了した。詳細は `docs/reviews/DEV-060-review-001.md` を参照する。
+- Runtime Projects / Logs は DEV-060 合格後に DEV-061 / DEV-062 として順次詳細化する。
