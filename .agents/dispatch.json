@@ -1,19 +1,19 @@
 {
   "protocol_version": 1,
-  "dispatch_id": 19,
-  "issued_at": "2026-11-25T00:55:00+09:00",
+  "dispatch_id": 20,
+  "issued_at": "2026-11-25T07:06:31+09:00",
   "issued_by": "orchestrator",
   "recipient": "implementer",
-  "command": "execute_task",
+  "command": "revise_task",
   "task_id": "DEV-062",
   "task_file": "docs/tasks/DEV-062.md",
-  "base_commit": "bcedfb3",
+  "base_commit": "b67ea13",
   "previous_task": {
-    "task_id": "DEV-061",
-    "decision": "approved_with_deferred_ci",
-    "review_file": "docs/reviews/DEV-061-review-001.md"
+    "task_id": "DEV-062",
+    "decision": "changes_requested",
+    "review_file": "docs/reviews/DEV-062-review-001.md"
   },
-  "required_action": "Pull origin/main, acknowledge dispatch 19, read docs/development/PLAN.md, docs/product/PRODUCT_MAP.md, docs/tasks/DEV-062.md, and docs/reviews/DEV-061-review-001.md. Implement provider-neutral read-only Engine logs API, bounded decode/filtering, Logs workspace with Alt+7 and optional polling, and unit/browser E2E definitions without host-file discovery or log persistence. Run static/unit checks and one available-runtime local CI at phase completion; if environment or permissions prevent CI, record Deferred CI without claiming success and continue. Push each meaningful checkpoint, then wait for review.",
+  "required_action": "Pull origin/main, acknowledge dispatch 20, read docs/reviews/DEV-062-review-001.md, enforce a hard cap on the final serialized logs JSON body and a post-decode requested-tail line bound, add the specified targeted regressions, run static/unit checks without repeating phase local CI, push each meaningful checkpoint, then wait for review.",
   "state": "assigned"
 }
 

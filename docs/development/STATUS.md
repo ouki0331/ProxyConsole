@@ -4,13 +4,13 @@ Updated: 2026-11-24
 Phase: P7
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 deferred / G7 pending
 Active task: DEV-062
-Task status: Ready for review
-Owner: orchestrator
-Last verified commit: `bcedfb3` (DEV-061 review 001 approved; static/unit/read-only evidence passed, Docker/Podman integration CI deferred by environment)
+Task status: In progress
+Owner: implementer
+Last verified commit: `efecba2` (DEV-062 static/unit/read-only evidence passed; review 001 found JSON response cap and decoded tail bound defects)
 Last substantive remote progress: `efecba2` (provider-neutral logs API, Logs workspace, Alt+7, filter/polling, and browser E2E definition implemented)
 Task definition baseline: `bcedfb3`
-Dispatched at: 2026-11-25 00:55 JST
-Mailbox dispatch: `19` (`.agents/dispatch.json`)
+Dispatched at: 2026-11-25 07:06 JST
+Mailbox dispatch: `20` (`.agents/dispatch.json`)
 
 ## Current summary
 
@@ -39,15 +39,17 @@ Mailbox dispatch: `19` (`.agents/dispatch.json`)
 - DEV-061 review 001はblocking findingなしでApprovedとなり、`Done`とした。
 - DEV-062 provider-neutral logs workspaceをdispatch 19で開始した。
 - DEV-062のbackend/API、Logs workspace、Alt+7、filter/polling、unit/API/browser E2E定義が完了した。static/unit検証は成功し、runtime未導入のためlocal CIはDeferredとして`Ready for review`とした。
+- DEV-062 review 001で、Engine raw byte capが最終JSON body capを保証しない問題と、decode後line数がrequested tailを超え得る問題を確認し、Changes requestedとした。
 
 ## Next transition
 
-orchestratorがDEV-062 artifact `5526893`、`efecba2`をreviewする。blocking defectがなければDEV-062を`Done`とし、Deferred CIを保持したままG7判定前の補完条件を確認する。
+implementerがdispatch 20をacknowledgeし、`docs/reviews/DEV-062-review-001.md`の2件をtargeted regression付きで修正して`Ready for review`へ戻す。phase local CIは再実行しない。
 
 ## Blocking items
 
 - 現在の orchestrator 環境には `docker` / `podman` command がない。runtime compatibility 実装後の local CI は各 runtime を利用できるローカル実行環境で行い、未実行側を成功扱いにしない。
-- なし。Deferred CIはblockingではなくVerification backlogとしてG7判定前に再評価する。
+- DEV-062の最終serialized JSON response bodyをhard cap以内に収める必要がある。
+- DEV-062のdecode後line数をrequested tail（既定200、最大1000）以下に保証する必要がある。
 
 ## Verification backlog
 
