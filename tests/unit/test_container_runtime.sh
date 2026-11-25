@@ -52,6 +52,13 @@ fi
 grep -Fx 'podman:cp source target' "${CALL_LOG}" >/dev/null
 
 : >"${CALL_LOG}"
+env -i "${base_env[@]}" CONTAINER_RUNTIME=podman COMPOSE_PROFILES=test bash -c '
+  source "${ROOT_DIR}/scripts/container-runtime.sh"
+  docker compose -f compose.yml up -d
+'
+grep -Fx 'podman:compose --profile test -f compose.yml up -d' "${CALL_LOG}" >/dev/null
+
+: >"${CALL_LOG}"
 env -i "${base_env[@]}" CONTAINER_RUNTIME=docker bash -c '
   source "${ROOT_DIR}/scripts/container-runtime.sh"
   [[ "${CONTAINER_ENGINE_PROVIDER}" == docker ]]

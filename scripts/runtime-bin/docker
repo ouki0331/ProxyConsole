@@ -14,6 +14,24 @@ if [[ "${1:-}" == "compose" ]]; then
   # Podman providers so the shared local CI entrypoint remains portable.
   compose_args=("$@")
   if [[ "${CONTAINER_COMPOSE_PROVIDER:-}" == podman-compose-* ]]; then
+    has_profile_arg=0
+    for arg in "${compose_args[@]}"; do
+      if [[ "${arg}" == "--profile" || "${arg}" == --profile=* ]]; then
+        has_profile_arg=1
+        break
+      fi
+    done
+    if [[ ${has_profile_arg} -eq 0 && -n "${COMPOSE_PROFILES:-}" ]]; then
+      profile_args=()
+      IFS=',' read -r -a requested_profiles <<<"${COMPOSE_PROFILES}"
+      for profile in "${requested_profiles[@]}"; do
+        if [[ -n "${profile}" ]]; then
+          profile_args+=(--profile "${profile}")
+        fi
+      done
+      compose_args=("${profile_args[@]}" "${compose_args[@]}")
+    fi
+
     compose_command=""
     for arg in "${compose_args[@]}"; do
       if [[ "${arg}" == "build" ]]; then
