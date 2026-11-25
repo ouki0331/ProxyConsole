@@ -75,6 +75,19 @@ if [[ "$(grep -c -- '--connect-timeout 1 --max-time 2' "${ROOT_DIR}/scripts/up.s
   exit 1
 fi
 
+if rg -n 'resolver 127\.0\.0\.11' \
+  "${ROOT_DIR}/deploy/nginx" "${ROOT_DIR}/services/recorder/route_manager.py" >/dev/null; then
+  echo "Nginx configuration contains Docker-only DNS resolver" >&2
+  exit 1
+fi
+
+grep -F '__CONTAINER_DNS_RESOLVERS__' \
+  "${ROOT_DIR}/deploy/nginx/edge/default.conf" >/dev/null
+grep -F '__CONTAINER_DNS_RESOLVERS__' \
+  "${ROOT_DIR}/deploy/nginx/router/default.conf" >/dev/null
+grep -F '__CONTAINER_DNS_RESOLVERS__' \
+  "${ROOT_DIR}/services/recorder/route_manager.py" >/dev/null
+
 set +e
 invalid_output="$(env -i "${base_env[@]}" CONTAINER_RUNTIME=invalid bash -c '
   source "${ROOT_DIR}/scripts/container-runtime.sh"

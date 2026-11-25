@@ -1,6 +1,27 @@
 #!/bin/sh
 set -eu
 
+LIVE_CONF="/etc/nginx/conf.d/default.conf"
+RESOLVERS="$(awk '$1 == "nameserver" { printf "%s ", $2 }' /etc/resolv.conf)"
+RESOLVERS="${RESOLVERS% }"
+
+if [ -z "${RESOLVERS}" ] || printf '%s' "${RESOLVERS}" | grep -Eq '[^0-9A-Fa-f:. ]'; then
+  echo "router-entrypoint: no safe DNS resolver found in /etc/resolv.conf" >&2
+  exit 1
+fi
+
+render_resolvers() {
+  source_path="$1"
+  destination_path="$2"
+  sed \
+    -e "s/__CONTAINER_DNS_RESOLVERS__/${RESOLVERS}/g" \
+    -e "s/127\\.0\\.0\\.11/${RESOLVERS}/g" \
+    "${source_path}" > "${destination_path}"
+}
+
+render_resolvers "${LIVE_CONF}" "${LIVE_CONF}.runtime"
+mv -f "${LIVE_CONF}.runtime" "${LIVE_CONF}"
+
 mkdir -p /var/lib/proxyconsole/router 2>/dev/null || true
 chmod 0777 /var/lib/proxyconsole/router 2>/dev/null || true
 touch /var/lib/proxyconsole/router/nginx-error.log 2>/dev/null || true
@@ -17,7 +38,6 @@ REQUESTS_DIR="${ROUTER_STATE_DIR}/requests"
 RESPONSES_DIR="${ROUTER_STATE_DIR}/responses"
 ACTIVE_CONF="${ROUTER_STATE_DIR}/active.conf"
 PREVIOUS_CONF="${ROUTER_STATE_DIR}/previous.conf"
-LIVE_CONF="/etc/nginx/conf.d/default.conf"
 
 mkdir -p "${CANDIDATES_DIR}" "${REQUESTS_DIR}" "${RESPONSES_DIR}"
 chmod -R 0777 "${ROUTER_STATE_DIR}" 2>/dev/null || true
@@ -29,7 +49,7 @@ validate_candidate() {
   val_dir="/tmp/nginx-val-${val_id}"
   rm -rf "${val_dir}"
   mkdir -p "${val_dir}"
-  cp "${cand_path}" "${val_dir}/candidate.conf"
+  render_resolvers "${cand_path}" "${val_dir}/candidate.conf"
   cat > "${val_dir}/nginx.conf" <<EOF
 user  nginx;
 worker_processes  auto;
@@ -58,10 +78,12 @@ EOF
 }
 
 if [ -s "${ACTIVE_CONF}" ]; then
-  if validate_candidate "${ACTIVE_CONF}" "boot" >/dev/null 2>&1; then
-    cp "${ACTIVE_CONF}" "/etc/nginx/conf.d/.boot.tmp"
+  render_resolvers "${ACTIVE_CONF}" "/etc/nginx/conf.d/.boot.rendered"
+  if validate_candidate "/etc/nginx/conf.d/.boot.rendered" "boot" >/dev/null 2>&1; then
+    cp "/etc/nginx/conf.d/.boot.rendered" "/etc/nginx/conf.d/.boot.tmp"
     mv -f "/etc/nginx/conf.d/.boot.tmp" "${LIVE_CONF}"
   fi
+  rm -f "/etc/nginx/conf.d/.boot.rendered"
 else
   cp "${LIVE_CONF}" "${ROUTER_STATE_DIR}/.active.boot.tmp"
   chmod 0666 "${ROUTER_STATE_DIR}/.active.boot.tmp" 2>/dev/null || true
@@ -110,7 +132,7 @@ fi
       cp "${LIVE_CONF}" "${PREVIOUS_CONF}"
       chmod 0666 "${PREVIOUS_CONF}" 2>/dev/null || true
       stage_tmp="/etc/nginx/conf.d/.default.conf.tmp.${REQ_ID}"
-      cp "${CANDIDATE_FILE}" "${stage_tmp}"
+      render_resolvers "${CANDIDATE_FILE}" "${stage_tmp}"
       mv -f "${stage_tmp}" "${LIVE_CONF}"
 
       # Step 3: Reload Nginx (or simulate reload failure) and rollback on failure

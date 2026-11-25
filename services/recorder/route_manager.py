@@ -390,7 +390,7 @@ class RouteManager:
                 f"    client_max_body_size 0;\n"
                 f"    proxy_request_buffering off;\n"
                 f"    error_log /var/lib/proxyconsole/router/nginx-error.log warn;\n\n"
-                f"    resolver 127.0.0.11 valid=1s ipv6=off;\n\n"
+                f"    resolver __CONTAINER_DNS_RESOLVERS__ valid=1s ipv6=off;\n\n"
                 f"    location /__pc_fast_timeout {{\n"
                 f"        set {var_to_name} {upstream_url};\n"
                 f"        proxy_pass {var_to_name};\n"
