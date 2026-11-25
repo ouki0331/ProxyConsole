@@ -32,17 +32,42 @@ echo "=== [2/9] Start proxy chain ==="
 
 echo "=== [3/9] Verify internal router and non-edge ports are NOT published to host ==="
 for internal_svc in inspector router echo-a echo-b; do
-  published_ports="$(docker compose -f "${COMPOSE_FILE}" ps --format json "${internal_svc}" | python3 -c '
+  published_ports="$(docker compose -f "${COMPOSE_FILE}" ps --format json | python3 -c '
 import json, sys
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
+
+expected_service = sys.argv[1]
+raw = sys.stdin.read().strip()
+if not raw:
+    rows = []
+else:
+    try:
+        parsed = json.loads(raw)
+        rows = parsed if isinstance(parsed, list) else [parsed]
+    except json.JSONDecodeError:
+        rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
+
+for data in rows:
+    labels = data.get("Labels") or {}
+    service = (
+        data.get("Service")
+        or labels.get("com.docker.compose.service")
+        or labels.get("io.podman.compose.service")
+    )
+    if service != expected_service:
         continue
-    data = json.loads(line)
-    pubs = [p for p in (data.get("Publishers") or []) if p.get("PublishedPort", 0) > 0]
-    if pubs:
-        print(json.dumps(pubs))
-')"
+    publishers = [
+        item
+        for item in (data.get("Publishers") or [])
+        if item.get("PublishedPort", 0) > 0
+    ]
+    ports = [
+        item
+        for item in (data.get("Ports") or [])
+        if item.get("host_port", 0) > 0
+    ]
+    if publishers or ports:
+        print(json.dumps(publishers or ports))
+' "${internal_svc}")"
   if [[ -n "${published_ports}" ]]; then
     echo "FAIL: Service ${internal_svc} published ports to host: ${published_ports}" >&2
     exit 1

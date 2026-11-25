@@ -41,10 +41,13 @@ env -i "${base_env[@]}" CONTAINER_RUNTIME=podman bash -c '
   [[ "${CONTAINER_COMPOSE_PROVIDER}" == podman-compose-subcommand ]]
   docker compose ps
   docker compose -f compose.yml build --quiet edge router
+  docker ps -a --filter label=com.docker.compose.service=inspector --format {{.ID}}
   docker cp source target
 '
 grep -Fx 'podman:compose ps' "${CALL_LOG}" >/dev/null
 grep -Fx 'podman:compose -f compose.yml build edge router' "${CALL_LOG}" >/dev/null
+grep -Fx 'podman:ps -a --filter label=com.docker.compose.service=inspector --format {{.ID}}' \
+  "${CALL_LOG}" >/dev/null
 if grep -F -- '--quiet' "${CALL_LOG}" >/dev/null; then
   echo "Podman compose build received unsupported --quiet flag" >&2
   exit 1
