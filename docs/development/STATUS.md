@@ -1,13 +1,13 @@
 # Project status
 
-Updated: 2026-11-24
+Updated: 2026-11-25
 Phase: P7
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 deferred / G7 pending
 Active task: DEV-062
-Task status: In progress
-Owner: implementer
-Last verified commit: `efecba2` (DEV-062 static/unit/read-only evidence passed; review 001 found JSON response cap and decoded tail bound defects)
-Last substantive remote progress: `efecba2` (provider-neutral logs API, Logs workspace, Alt+7, filter/polling, and browser E2E definition implemented)
+Task status: Ready for review
+Owner: orchestrator
+Last verified commit: `aede06f` (DEV-062 review 001 response cap / tail bound remediation and 23 runtime tests passed)
+Last substantive remote progress: `aede06f` (final JSON byte cap and post-decode requested-tail bound implemented with targeted regressions)
 Task definition baseline: `bcedfb3`
 Dispatched at: 2026-11-25 07:06 JST
 Mailbox dispatch: `20` (`.agents/dispatch.json`)
@@ -40,16 +40,15 @@ Mailbox dispatch: `20` (`.agents/dispatch.json`)
 - DEV-062 provider-neutral logs workspaceをdispatch 19で開始した。
 - DEV-062のbackend/API、Logs workspace、Alt+7、filter/polling、unit/API/browser E2E定義が完了した。static/unit検証は成功し、runtime未導入のためlocal CIはDeferredとして`Ready for review`とした。
 - DEV-062 review 001で、Engine raw byte capが最終JSON body capを保証しない問題と、decode後line数がrequested tailを超え得る問題を確認し、Changes requestedとした。
+- dispatch 20で最終JSON body capとdecode後tail boundを修正し、巨大line/control character/multi-byte/default 200/max 1000/filter順序/HTTP bodyの回帰を追加した。targeted 17件、runtime 23件、static/read-only検証に成功して`Ready for review`へ戻した。
 
 ## Next transition
 
-implementerがdispatch 20をacknowledgeし、`docs/reviews/DEV-062-review-001.md`の2件をtargeted regression付きで修正して`Ready for review`へ戻す。phase local CIは再実行しない。
+orchestratorがdispatch 20成果を独立reviewし、合格時はDEV-062を`Done`へ更新する。phase local CIは再実行せずDeferred CI証拠を維持する。
 
 ## Blocking items
 
 - 現在の orchestrator 環境には `docker` / `podman` command がない。runtime compatibility 実装後の local CI は各 runtime を利用できるローカル実行環境で行い、未実行側を成功扱いにしない。
-- DEV-062の最終serialized JSON response bodyをhard cap以内に収める必要がある。
-- DEV-062のdecode後line数をrequested tail（既定200、最大1000）以下に保証する必要がある。
 
 ## Verification backlog
 
