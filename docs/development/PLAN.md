@@ -3,7 +3,7 @@
 更新日: 2026-11-24
 計画状態: Active
 現在フェーズ: P7 — Personal local dashboard & observability
-実装状態: G5 passed / P6 deferred / DEV-060 review remediation planned
+実装状態: G5 passed / P6 deferred / P7 implementation complete / G7 deferred CI
 
 ## 1. バージョン目標
 
