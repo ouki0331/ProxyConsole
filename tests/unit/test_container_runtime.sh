@@ -67,6 +67,14 @@ auto_provider="$(env -i "${base_env[@]}" CONTAINER_RUNTIME=auto bash -c '
 ')"
 [[ "${auto_provider}" == podman ]]
 
+grep -Fx 'COPY services/recorder/engine_logs.py /app/recorder/engine_logs.py' \
+  "${ROOT_DIR}/services/recorder/Dockerfile" >/dev/null
+
+if [[ "$(grep -c -- '--connect-timeout 1 --max-time 2' "${ROOT_DIR}/scripts/up.sh")" -ne 2 ]]; then
+  echo "Readiness probes must have bounded connection and total timeouts" >&2
+  exit 1
+fi
+
 set +e
 invalid_output="$(env -i "${base_env[@]}" CONTAINER_RUNTIME=invalid bash -c '
   source "${ROOT_DIR}/scripts/container-runtime.sh"

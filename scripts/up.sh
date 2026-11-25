@@ -26,13 +26,13 @@ docker compose -f "${COMPOSE_FILE}" up -d
 echo "[up] Waiting for HTTPS edge (${EDGE_HTTPS_PORT}) and control API (${CONTROL_API_PORT})..."
 for _ in $(seq 1 30); do
   status_code="$(
-    curl -s -o /dev/null -w "%{http_code}" \
+    curl -s --connect-timeout 1 --max-time 2 -o /dev/null -w "%{http_code}" \
       --cacert "${ROOT_DIR}/var/certificates/edge.crt" \
       --resolve "${APP_A_HOST}:${EDGE_HTTPS_PORT}:127.0.0.1" \
       "https://${APP_A_HOST}:${EDGE_HTTPS_PORT}/readyz" || true
   )"
   api_code="$(
-    curl -s -o /dev/null -w "%{http_code}" \
+    curl -s --connect-timeout 1 --max-time 2 -o /dev/null -w "%{http_code}" \
       "http://127.0.0.1:${CONTROL_API_PORT}/api/v1/health" || true
   )"
   if [[ "${status_code}" == "200" && "${api_code}" == "200" ]]; then

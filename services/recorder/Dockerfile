@@ -18,6 +18,7 @@ COPY migrations/007_notifications.sql /app/migrations/007_notifications.sql
 COPY services/recorder/parser.py /app/recorder/parser.py
 COPY services/recorder/retention.py /app/recorder/retention.py
 COPY services/recorder/docker_discovery.py /app/recorder/docker_discovery.py
+COPY services/recorder/engine_logs.py /app/recorder/engine_logs.py
 COPY services/recorder/route_manager.py /app/recorder/route_manager.py
 COPY services/recorder/draft_replay.py /app/recorder/draft_replay.py
 COPY services/recorder/rule_engine.py /app/recorder/rule_engine.py
