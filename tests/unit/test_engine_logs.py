@@ -20,7 +20,9 @@ from engine_logs import (  # noqa: E402
     EngineLogsService,
     EngineLogsUnavailableError,
     EngineLogsValidationError,
+    bound_log_response,
     decode_engine_log_payload,
+    serialized_json_size,
 )
 
 
@@ -179,6 +181,64 @@ class EngineLogsServiceTest(unittest.TestCase):
         self.assertEqual(payload, b"01234567")
         self.assertTrue(truncated)
 
+    def test_decoded_lines_are_bounded_before_filters(self) -> None:
+        payload = b"2026-11-24T00:00:00Z ERROR outside requested tail\n" + b"".join(
+            f"2026-11-24T00:00:{index % 60:02d}Z info-{index}\n".encode()
+            for index in range(200)
+        )
+        self.service._engine_get_bytes = (  # type: ignore[method-assign]
+            lambda *args, **kwargs: (payload, False)
+        )
+
+        default_result = self.service.get_logs(container_id="a" * 64)
+        self.assertEqual(default_result["returned"], 200)
+        self.assertEqual(default_result["lines"][0]["text"], "info-0")
+        self.assertTrue(default_result["truncated"])
+
+        filtered_result = self.service.get_logs(
+            container_id="a" * 64, severity="error"
+        )
+        self.assertEqual(filtered_result["returned"], 0)
+        self.assertTrue(filtered_result["truncated"])
+
+    def test_requested_max_tail_is_enforced_after_decode(self) -> None:
+        payload = b"".join(f"line-{index}\n".encode() for index in range(1001))
+        self.service._engine_get_bytes = (  # type: ignore[method-assign]
+            lambda *args, **kwargs: (payload, False)
+        )
+        result = self.service.get_logs(container_id="a" * 64, tail=1000)
+        self.assertEqual(result["returned"], 1000)
+        self.assertEqual(result["lines"][0]["text"], "line-1")
+        self.assertTrue(result["truncated"])
+
+    def test_final_json_cap_omits_oversized_line_without_changing_it(self) -> None:
+        raw_text = "\x00" * 5000
+        self.service.response_byte_cap = 2048
+        self.service._engine_get_bytes = lambda *args, **kwargs: (  # type: ignore[method-assign]
+            raw_text.encode() + b"\n",
+            False,
+        )
+        result = self.service.get_logs(container_id="a" * 64)
+        self.assertEqual(result["returned"], 0)
+        self.assertEqual(result["lines"], [])
+        self.assertTrue(result["truncated"])
+        self.assertLessEqual(serialized_json_size(result), 2048)
+
+    def test_final_json_cap_counts_control_and_multibyte_encoding(self) -> None:
+        raw_lines = [f"entry-{index}-\x00-漢🙂" for index in range(80)]
+        self.service.response_byte_cap = 2048
+        self.service._engine_get_bytes = lambda *args, **kwargs: (  # type: ignore[method-assign]
+            ("\n".join(raw_lines) + "\n").encode("utf-8"),
+            False,
+        )
+        result = self.service.get_logs(container_id="a" * 64)
+        retained = [line["text"] for line in result["lines"]]
+        self.assertGreater(len(retained), 0)
+        self.assertLess(len(retained), len(raw_lines))
+        self.assertEqual(retained, raw_lines[: len(retained)])
+        self.assertTrue(result["truncated"])
+        self.assertLessEqual(serialized_json_size(result), 2048)
+
 
 class StubLogs:
     def get_logs(self, **kwargs: object) -> dict[str, object]:
@@ -190,6 +250,24 @@ class StubLogs:
             raise EngineLogsUnavailableError("engine offline")
         if severity == "invalid":
             raise EngineLogsValidationError("invalid severity")
+        if container_id == "bounded":
+            return bound_log_response(
+                {
+                    "available": True,
+                    "lines": [
+                        {
+                            "timestamp": None,
+                            "stream": "stdout",
+                            "severity": "info",
+                            "text": "\x00" * 5000,
+                        }
+                    ],
+                    "returned": 1,
+                    "truncated": False,
+                    "error": None,
+                },
+                1024,
+            )
         return {"available": True, "returned": 0, "lines": [], "error": None}
 
 
@@ -218,12 +296,17 @@ class EngineLogsApiTest(unittest.TestCase):
         cls.thread.join(timeout=2)
 
     def request(self, query: str) -> tuple[int, dict[str, object]]:
+        status, raw_body, _ = self.request_raw(query)
+        return status, json.loads(raw_body.decode("utf-8"))
+
+    def request_raw(self, query: str) -> tuple[int, bytes, int]:
         conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=2)
         conn.request("GET", f"/api/v1/runtime/logs?{query}")
         response = conn.getresponse()
-        body = json.loads(response.read().decode("utf-8"))
+        body = response.read()
+        content_length = int(response.getheader("Content-Length") or "0")
         conn.close()
-        return response.status, body
+        return response.status, body, content_length
 
     def test_http_status_contract(self) -> None:
         self.assertEqual(self.request("container_id=known")[0], 200)
@@ -232,6 +315,15 @@ class EngineLogsApiTest(unittest.TestCase):
         status, body = self.request("container_id=known&severity=invalid")
         self.assertEqual(status, 400)
         self.assertEqual(body["error"], "invalid_log_filter")
+
+    def test_http_response_uses_the_enforced_serialized_cap(self) -> None:
+        status, body, content_length = self.request_raw("container_id=bounded")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(body), content_length)
+        self.assertLessEqual(len(body), 1024)
+        parsed = json.loads(body.decode("utf-8"))
+        self.assertEqual(parsed["returned"], 0)
+        self.assertTrue(parsed["truncated"])
 
 
 if __name__ == "__main__":

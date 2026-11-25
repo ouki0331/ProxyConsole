@@ -33,6 +33,7 @@ from engine_logs import (
     EngineLogSourceNotFoundError,
     EngineLogsUnavailableError,
     EngineLogsValidationError,
+    serialize_json_payload,
 )
 from index_store import CaptureIndexStore
 from notification_engine import (
@@ -139,9 +140,7 @@ class CaptureApiHandler(BaseHTTPRequestHandler):
     store = CaptureIndexStore()
 
     def _send_json(self, status: int, payload: dict[str, Any]) -> None:
-        body = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode(
-            "utf-8"
-        )
+        body = serialize_json_payload(payload)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

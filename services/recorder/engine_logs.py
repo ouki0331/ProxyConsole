@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import http.client
+import json
 import os
 import re
 import struct
@@ -123,6 +124,49 @@ def decode_engine_log_payload(payload: bytes) -> tuple[list[dict[str, Any]], str
         return lines, "multiplexed"
 
     return _lines_for_chunk(payload, "stdout"), "plain"
+
+
+def serialize_json_payload(payload: dict[str, Any]) -> bytes:
+    """Serialize an API payload using the shared HTTP response contract."""
+
+    return (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
+def serialized_json_size(payload: dict[str, Any]) -> int:
+    """Return the exact byte length emitted by the HTTP API."""
+
+    return len(serialize_json_payload(payload))
+
+
+def bound_log_response(payload: dict[str, Any], byte_cap: int) -> dict[str, Any]:
+    """Keep complete chronological lines while bounding the final JSON body."""
+
+    if serialized_json_size(payload) <= byte_cap:
+        return payload
+
+    all_lines = list(payload["lines"])
+    payload["truncated"] = True
+
+    # Serialized size is monotonic for prefixes. Binary search avoids repeatedly
+    # encoding up to 1000 potentially large log lines.
+    low = 0
+    high = len(all_lines)
+    while low < high:
+        midpoint = (low + high + 1) // 2
+        payload["lines"] = all_lines[:midpoint]
+        payload["returned"] = midpoint
+        if serialized_json_size(payload) <= byte_cap:
+            low = midpoint
+        else:
+            high = midpoint - 1
+
+    payload["lines"] = all_lines[:low]
+    payload["returned"] = low
+    if serialized_json_size(payload) > byte_cap:
+        raise EngineLogsValidationError(
+            "log response metadata exceeds ENGINE_LOG_RESPONSE_BYTE_CAP"
+        )
+    return payload
 
 
 class EngineLogsService:
@@ -244,6 +288,9 @@ class EngineLogsService:
             path, socket_path=str(scan["socket_path"])
         )
         lines, encoding = decode_engine_log_payload(payload)
+        tail_truncated = len(lines) > parsed_tail
+        if tail_truncated:
+            lines = lines[-parsed_tail:]
         if parsed_severity is not None:
             lines = [line for line in lines if line["severity"] == parsed_severity]
         if parsed_search is not None:
@@ -260,7 +307,7 @@ class EngineLogsService:
             "role": container.get("role"),
             "state": container.get("state"),
         }
-        return {
+        result = {
             "available": True,
             "provider": scan["provider"],
             "container": metadata,
@@ -273,8 +320,9 @@ class EngineLogsService:
             "encoding": encoding,
             "lines": lines,
             "returned": len(lines),
-            "truncated": byte_truncated,
+            "truncated": byte_truncated or tail_truncated,
             "response_byte_cap": self.response_byte_cap,
             "refreshed_at": datetime.now(timezone.utc).isoformat(),
             "error": None,
         }
+        return bound_log_response(result, self.response_byte_cap)
