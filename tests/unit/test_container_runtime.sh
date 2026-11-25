@@ -87,6 +87,8 @@ grep -F '__CONTAINER_DNS_RESOLVERS__' \
   "${ROOT_DIR}/deploy/nginx/router/default.conf" >/dev/null
 grep -F '__CONTAINER_DNS_RESOLVERS__' \
   "${ROOT_DIR}/services/recorder/route_manager.py" >/dev/null
+grep -Fx 'CMD ["nginx", "-g", "daemon off;"]' \
+  "${ROOT_DIR}/deploy/nginx/edge/Dockerfile" >/dev/null
 
 set +e
 invalid_output="$(env -i "${base_env[@]}" CONTAINER_RUNTIME=invalid bash -c '

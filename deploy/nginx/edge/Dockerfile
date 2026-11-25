@@ -7,3 +7,4 @@ COPY var/certificates/edge.key /etc/nginx/certs/edge.key
 RUN chmod +x /usr/local/bin/edge-entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/edge-entrypoint.sh"]
+CMD ["nginx", "-g", "daemon off;"]
