@@ -40,9 +40,15 @@ env -i "${base_env[@]}" CONTAINER_RUNTIME=podman bash -c '
   [[ "${CONTAINER_ENGINE_PROVIDER}" == podman ]]
   [[ "${CONTAINER_COMPOSE_PROVIDER}" == podman-compose-subcommand ]]
   docker compose ps
+  docker compose -f compose.yml build --quiet edge router
   docker cp source target
 '
 grep -Fx 'podman:compose ps' "${CALL_LOG}" >/dev/null
+grep -Fx 'podman:compose -f compose.yml build edge router' "${CALL_LOG}" >/dev/null
+if grep -F -- '--quiet' "${CALL_LOG}" >/dev/null; then
+  echo "Podman compose build received unsupported --quiet flag" >&2
+  exit 1
+fi
 grep -Fx 'podman:cp source target' "${CALL_LOG}" >/dev/null
 
 : >"${CALL_LOG}"
@@ -50,8 +56,10 @@ env -i "${base_env[@]}" CONTAINER_RUNTIME=docker bash -c '
   source "${ROOT_DIR}/scripts/container-runtime.sh"
   [[ "${CONTAINER_ENGINE_PROVIDER}" == docker ]]
   docker compose ps
+  docker compose -f compose.yml build --quiet edge router
 '
 grep -Fx 'docker:compose ps' "${CALL_LOG}" >/dev/null
+grep -Fx 'docker:compose -f compose.yml build --quiet edge router' "${CALL_LOG}" >/dev/null
 
 auto_provider="$(env -i "${base_env[@]}" CONTAINER_RUNTIME=auto bash -c '
   source "${ROOT_DIR}/scripts/container-runtime.sh"

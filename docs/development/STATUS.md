@@ -3,8 +3,8 @@
 Updated: 2026-11-25
 Phase: P7
 Phase gate: G0 passed / G1 passed / G2 passed / G3 passed / G4 passed / G5 passed / G6 deferred / G7 deferred CI
-Active task: None (verification backlog only)
-Task status: Done
+Active task: DEV-063 local CI verification
+Task status: In progress
 Owner: orchestrator
 Last verified commit: `9efb000` (DEV-062 review 001 remediation evidence independently passed; review 002 approved)
 Last substantive remote progress: `aede06f` (final JSON byte cap and post-decode requested-tail bound implemented with targeted regressions)
@@ -42,6 +42,7 @@ Mailbox dispatch: `20` (`.agents/dispatch.json`)
 - DEV-062 review 001で、Engine raw byte capが最終JSON body capを保証しない問題と、decode後line数がrequested tailを超え得る問題を確認し、Changes requestedとした。
 - dispatch 20で最終JSON body capとdecode後tail boundを修正し、巨大line/control character/multi-byte/default 200/max 1000/filter順序/HTTP bodyの回帰を追加した。targeted 17件、runtime 23件、static/read-only検証に成功して`Ready for review`へ戻した。
 - DEV-062 review 002はblocking findingなしでApprovedとなり、`Done`とした。P7実装は完了し、runtime未導入のlocal CIと実Engine/browser検証をG7 Deferred CIとして保持する。
+- 利用者指示により、GitHub Actionsを使用せずPodman local CIを補完するDEV-063を開始した。
 
 ## Next transition
 

@@ -8,12 +8,36 @@ fi
 
 if [[ "${1:-}" == "compose" ]]; then
   shift
+
+  # podman-compose 1.5.0 rejects Docker Compose's build-only --quiet flag.
+  # Keep Docker arguments unchanged, but omit that optional output flag for
+  # Podman providers so the shared local CI entrypoint remains portable.
+  compose_args=("$@")
+  if [[ "${CONTAINER_COMPOSE_PROVIDER:-}" == podman-compose-* ]]; then
+    compose_command=""
+    for arg in "${compose_args[@]}"; do
+      if [[ "${arg}" == "build" ]]; then
+        compose_command="build"
+        break
+      fi
+    done
+    if [[ "${compose_command}" == "build" ]]; then
+      filtered_args=()
+      for arg in "${compose_args[@]}"; do
+        if [[ "${arg}" != "--quiet" ]]; then
+          filtered_args+=("${arg}")
+        fi
+      done
+      compose_args=("${filtered_args[@]}")
+    fi
+  fi
+
   case "${CONTAINER_COMPOSE_PROVIDER:-}" in
     podman-compose-binary)
-      exec "${CONTAINER_COMPOSE_BIN}" "$@"
+      exec "${CONTAINER_COMPOSE_BIN}" "${compose_args[@]}"
       ;;
     podman-compose-subcommand|docker-compose-plugin)
-      exec "${CONTAINER_ENGINE_BIN}" compose "$@"
+      exec "${CONTAINER_ENGINE_BIN}" compose "${compose_args[@]}"
       ;;
     *)
       echo "[runtime] Unknown Compose provider: ${CONTAINER_COMPOSE_PROVIDER:-unset}" >&2
